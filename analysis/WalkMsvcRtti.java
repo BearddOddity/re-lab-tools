@@ -35,9 +35,27 @@ import java.util.Set;
  */
 public class WalkMsvcRtti extends GhidraScript {
 
+    /** True for a name this script previously mangled by mis-splitting a template. */
+    static boolean isBadTemplateName(String n) {
+        return n.contains("?$") || n.startsWith("$");
+    }
+
     private static String demangle(String raw) {
         String s = raw;
         if (s.startsWith(".?AV") || s.startsWith(".?AU")) s = s.substring(4);
+
+        // Templates encode nested types, and reversing on '@' turns
+        // ".?AV?$handle_str@...@ratl@@" into "$0A::V?$handle_str::?$map_vs" -
+        // a name that looks demangled and is not. A wrong-but-plausible name is
+        // worse than an ugly one, because later work trusts it. So templates
+        // keep their raw mangled form, sanitised into a legal identifier: it is
+        // unique, greppable, and obviously not a tidy class name.
+        if (s.contains("?$")) {
+            String t = raw.replaceAll("[^A-Za-z0-9_]", "_").replaceAll("_+", "_");
+            if (t.length() > 96) t = t.substring(0, 96);
+            return "tmpl_" + t;
+        }
+
         int at = s.indexOf("@@");
         if (at >= 0) s = s.substring(0, at);
         StringBuilder sb = new StringBuilder();
@@ -125,7 +143,7 @@ public class WalkMsvcRtti extends GhidraScript {
                         if (f == null) f = createFunction(target, null);
                         if (f == null) break;
                         slots++;
-                        if (f.getName().startsWith("FUN_")) {
+                        if (f.getName().startsWith("FUN_") || isBadTemplateName(f.getName())) {
                             f.setName(cls + "::vfunc" + slot, SourceType.ANALYSIS);
                             renamed++;
                             if (examples.size() < 10) examples.add(cls + "::vfunc" + slot + " @ " + target);
