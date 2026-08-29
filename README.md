@@ -36,6 +36,7 @@ Operating the lab itself.
 | `ApplyXbSymbols.java` | Ghidra script — applies XbSymbolDatabase output (`NAME = 0xADDR`) to the open program |
 | `ParseXboxHeaders.java` | Ghidra script — parses the flattened Xbox SDK header into data types, and writes a reusable `.gdt` |
 | `ApplyXboxSignatures.java` | Ghidra script — gives the named SDK functions their real prototypes |
+| `BuildFidDatabase.java` | Ghidra script — builds a Function ID (`.fidb`) database from a program's named functions |
 
 ### pcode-dis.py needs the opcode table
 
@@ -172,6 +173,44 @@ to
 Measured on X-Men Legends: 2,084 types parsed, program types 97 -> 2,161, and
 142 of 344 symbols got real prototypes. The rest are data symbols (67) or
 internal SDK functions that no public header declares (129).
+
+### Function ID (FID) across titles from the same SDK
+
+Ghidra ships the FunctionID engine but **no `.fidb` data at all**, and the
+normal way to populate one is a GUI dialog whose worker
+(`FidServiceLibraryIngest`) is package-private and unreachable from a script.
+`analysis/BuildFidDatabase.java` uses the public `FidDB` API instead, which also
+makes the ingest filter explicit: only functions with real names are stored,
+because a `FUN_` hash can never usefully name anything.
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts     -postScript BuildFidDatabase.java out.fidb <LibName> <Version> <Variant>
+```
+
+**Check the SDK build before expecting cross-title matches.** An XBE records
+every linked library and its build in its header, so this is a fact to read, not
+a guess:
+
+| offset | field |
+|---|---|
+| `0x104` | `dwBaseAddr` |
+| `0x160` | `dwLibraryVersions` (count) |
+| `0x164` | `dwLibraryVersionsAddr` |
+
+Each entry is 16 bytes: `char szName[8]; u16 major; u16 minor; u16 build; u16 flags`.
+The header region maps 1:1 from file offset 0, so `file_offset = addr - base`.
+
+X-Men Legends and X-Men Legends II both report **XDK 5849 for every library**,
+including `LIBCMT` and `LIBCPMT` - the C and C++ runtimes are statically linked
+and byte-identical between them. That is what makes FID worth building here: a
+match is not a guess when the library code is literally the same bytes.
+
+**What FID cannot do here.** It transfers names that already exist; it does not
+invent them. There is no source of MSVC CRT names in this toolchain - no XDK
+`.lib` files, and Ghidra ships no MSVC FID data - so the thousands of statically
+linked CRT/STL functions stay unnamed. FID moves the ~671 known names to other
+XDK 5849 titles, which is worth having and is not the same as solving the
+unnamed-function problem.
 
 ## solutions/
 
