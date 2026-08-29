@@ -250,6 +250,45 @@ map of every 4-byte-aligned dword whose value lands inside the image makes each
 lookup constant time and the whole walk finish in about a minute - and the index
 is small (51k entries here) because non-pointer values are skipped.
 
+### Three-way split: engine, platform, and game
+
+With a third title on the same SDK and a build of one title for another
+platform, the "shared" bucket splits further. Presence in a PC build means the
+code is not Xbox platform code; presence in an unrelated title on the same
+engine means it is not this game's logic.
+
+X-Men Legends, against X-Men Legends II (Xbox), Marvel: Ultimate Alliance
+(Xbox) and X-Men Legends II (PC) - all XDK 5849, all Intrinsic Alchemy:
+
+| bucket | functions | |
+|---|---|---|
+| Xbox-side shared (XDK / CRT / engine) | 7,504 | 47% |
+| **unique to this game** | **5,573** | 35% |
+| engine/runtime, cross-platform | 1,774 | 11% |
+| portable, X-Men only | 747 | 4% |
+| X-Men series only (Xbox) | 144 | <1% |
+
+Library/engine surface 9,278; game surface 6,464. Of the game surface, 1,851 are
+named and **3,866 are not** - that is the remaining work, and it is a far
+smaller number than the 14,000 the binary starts with.
+
+**Read the cross-platform bucket as a floor, not a measurement.** The PC build
+is a separate compilation, so only functions that compiled identically match at
+all - it yields 11,699 hashed functions against the Xbox build's 19,490. Plenty
+of Alchemy engine code sits in "Xbox-side shared" purely because it did not
+match the PC build, not because it is Xbox-specific.
+
+**Architecture has to match.** FID hashes are instruction bytes, so this works
+only within one architecture. Xbox and the 2005 PC build are both x86-32. The
+2016 Marvel: Ultimate Alliance re-releases are x64 and cannot participate in any
+byte-level comparison at all.
+
+Class names can still be compared across architectures, because they are
+source-level. Comparing RTTI class name sets across all four titles put 471 of
+X-Men Legends' 873 classes in the engine/framework set, 34 in X-Men-series-only,
+and 183 unique to the game - which confirmed the function-level split rather
+than overturning it.
+
 ### Separating engine code from game code
 
 Two titles built with the same SDK and engine share their library code, so
