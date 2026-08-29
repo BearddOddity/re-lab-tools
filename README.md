@@ -129,10 +129,21 @@ explicit `WxH`. Shortcuts for the first two are created by
 ## Things that will bite
 
 - **Processes started from Windows die immediately.** A process launched by a
-  one-shot `wsl.exe` call is killed when that call returns; `nohup`, `&` and
+  *one-shot* `wsl.exe` call is killed when that call returns; `nohup`, `&` and
   `setsid` do not save it. Anything that must survive needs a launcher that
   **blocks**, started with `Start-Process`. That is why `re-desktop`,
   `run-target` and `ghidra-mcp-start` all block.
+
+  **This does not apply through the MCP server.** `lab_mcp.py` is itself a
+  long-lived process inside the lab, so a `setsid` child spawned from
+  `lab_exec` outlives the call:
+
+  ```
+  setsid env DISPLAY=:10 some-gui-app >/tmp/app.log 2>&1 < /dev/null &
+  ```
+
+  Prefer that over `Start-Process` when the MCP is available — it is one call
+  instead of a launcher script, and there is no quoting to get wrong.
 - **Run GUI targets on `:10`, not `:0`.** Under WSLg a window reports 1x1
   geometry and screenshots come back blank — it is a proxy for a real Windows
   window. Xephyr behaves normally.
