@@ -33,6 +33,7 @@ Operating the lab itself.
 | `dump-wine-image.py` | Dump a PE image out of a running Wine process via `/proc/pid/mem` |
 | `mem-strings.py` | UTF-16LE strings from a live process, with addresses |
 | `catch-vbastrcmp` | Break on `msvbvm60!__vbaStrCmp` and log both arguments |
+| `ApplyXbSymbols.java` | Ghidra script — applies XbSymbolDatabase output (`NAME = 0xADDR`) to the open program |
 
 ### pcode-dis.py needs the opcode table
 
@@ -103,6 +104,34 @@ Install by copying into `~/.claude/skills/` on the machine running Claude Code
 Copy-Item D:
 e-lab-tools\skills\* $env:USERPROFILE\.claude\skills\ -Recurse -Force
 ```
+
+## Xbox / XBE work
+
+The lab can load Xbox executables. `ghidra-xbe` (Matt Borgerson's XBE loader) is
+installed into `~/.config/ghidra/<ver>/Extensions`; it ships built for Ghidra
+12.0.3 and its `extension.properties` version must be edited to match the
+installed Ghidra or the extension is silently ignored. Patched to 12.1.3 it
+loads and imports XBEs correctly - verified by importing a game XBE headless and
+seeing `Using Loader: Xbox Executable Format (XBE)`.
+
+`XbSymbolDatabase` (RadWolfie/jarupxx/PatrickvL, OOVPA signatures originally by
+Caustik) identifies Xbox SDK functions and globals by signature. It ships a
+prebuilt `linux_x64/bin/XbSymbolDatabaseCLI` that needs no compilation:
+
+```bash
+XbSymbolDatabaseCLI default.xbe > symbols.txt     # "NAME = 0xADDR" per line
+```
+
+Apply the result with `analysis/ApplyXbSymbols.java`, run headless so the GUI
+does not hold the project:
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript ApplyXbSymbols.java symbols.txt
+```
+
+A signature match is worth less than a name a person chose, so the script leaves
+any non-default function name alone and attaches the SDK name as a secondary
+label instead of overwriting it.
 
 ## solutions/
 
