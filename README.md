@@ -49,6 +49,8 @@ Operating the lab itself.
 | `DecompileUnnamed.java` | Ghidra script — batch-decompiles the largest unnamed functions with call context |
 | `DecompileList.java` | Ghidra script — batch-decompiles a given list of addresses |
 | `NameByStringXref.java` | Ghidra script — names functions from the string constants they reference |
+| `ForceRename.java` | Ghidra script — renames unconditionally; the only way to back out a bad name |
+| `function-queue.py` | Works through unnamed game functions in batches, keeping state |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -289,6 +291,34 @@ Name from evidence and claim no more than that. `FUN_00062f10` copies a string,
 scans for a `%END%` marker and pulls replacements from the resource manager: it
 is `ExpandTextMacros_PercentEnd`. Its callers are `CBlock` virtuals, but `this`
 being a `CBlock` is inference, so no class prefix was claimed.
+
+### A queue for the functions only reading will identify
+
+Automatic naming runs out. What is left needs a person to read it, which is slow
+and open-ended - so it wants a queue with state rather than a session that starts
+from nothing and re-reads what it already read.
+
+```bash
+analysis/function-queue.py status
+analysis/function-queue.py next -n 8      # decompile the next batch with context
+analysis/function-queue.py record names.txt
+```
+
+Each packet carries callers, callees, size and classification bucket alongside
+the decompilation, because the context usually settles a function faster than its
+body does - "called by CCEPowerup::vfunc4, calls GetScriptEngine" is often enough
+on its own. Largest first: the big functions are the systems everything else
+hangs off.
+
+`record` marks the whole batch reviewed, named or not. A function that was looked
+at and could not be identified must not return to the top of the queue on the
+next run.
+
+**Keep a way to back out a name.** `ApplyXbSymbols` refuses to overwrite an
+existing name, which is correct for importing and useless for correcting a
+mistake. `ForceRename.java` overwrites, and restores a true default name by
+clearing it rather than writing the `FUN_` text - setting that literally leaves a
+user-defined symbol that merely looks default.
 
 ### Measure a heuristic before letting it name anything
 
