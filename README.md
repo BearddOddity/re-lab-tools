@@ -37,6 +37,8 @@ Operating the lab itself.
 | `ParseXboxHeaders.java` | Ghidra script — parses the flattened Xbox SDK header into data types, and writes a reusable `.gdt` |
 | `ApplyXboxSignatures.java` | Ghidra script — gives the named SDK functions their real prototypes |
 | `BuildFidDatabase.java` | Ghidra script — builds a Function ID (`.fidb`) database from a program's named functions |
+| `DumpFunctionHashes.java` | Ghidra script — dumps every function's FID hash, for cross-binary comparison |
+| `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
 
@@ -211,6 +213,59 @@ invent them. There is no source of MSVC CRT names in this toolchain - no XDK
 linked CRT/STL functions stay unnamed. FID moves the ~671 known names to other
 XDK 5849 titles, which is worth having and is not the same as solving the
 unnamed-function problem.
+
+### Separating engine code from game code
+
+Two titles built with the same SDK and engine share their library code, so
+anything present in both is engine/runtime/SDK and anything in only one is that
+game's own logic. For a recompilation that split is worth more than names -
+shared code can be replaced with a real implementation instead of recompiled,
+and the unique set is the part that actually has to be understood.
+
+Raw byte comparison does not work: the same function links at a different
+address in each image, so every absolute operand differs. Ghidra's FID hash
+masks exactly those operands, which makes it the right instrument.
+
+```bash
+# once per binary
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript DumpFunctionHashes.java hashes_X.txt
+# then
+analysis/classify-shared-functions.py hashes_A.txt hashes_B.txt -o out/
+```
+
+Measured on X-Men Legends vs X-Men Legends II (both XDK 5849, both Intrinsic
+Alchemy):
+
+| | |
+|---|---|
+| XML1 functions | 14,119 |
+| SHARED - engine, CRT, XDK | **8,537 (60%)** |
+| UNIQUE - the game's own code | **5,582** |
+
+That is the number that matters: the recomp's real surface is about 5,600
+functions, not 14,000.
+
+Names transfer as a side effect, but expect little: only 364 of the shared
+functions carried a name, and 320 of those were SDK functions XbSymbolDatabase
+had already found in both binaries. 44 were genuinely new. A name is carried
+only when the hash matches exactly one function on each side - a one-to-many
+match cannot say which candidate it belongs to, and guessing plants a wrong name
+that later work would trust.
+
+### The engine is Intrinsic Alchemy, not a Raven engine
+
+Worth knowing before hunting for documentation. Both games carry `ig*` class
+names as plain strings - 693 unique in X-Men Legends, 490 in Legends II, 208 in
+the PC build of Legends II - alongside literal `Alchemy`, `Intrinsic`,
+`IGBFile` and `.igb` markers.
+
+    igObject  igActor  igAnimationDatabase  igArenaMemoryPool  igIGBFile ...
+
+In X-Men Legends those 693 names sit in one contiguous blob (540 of 684
+consecutive names within 64 bytes of each other), which is the shape of a
+runtime type-registration table rather than scattered debug text. Following the
+references into that table is a route to naming classes and their vtables, and
+therefore virtual methods, in bulk.
 
 ## solutions/
 
