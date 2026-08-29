@@ -201,6 +201,28 @@ Find the real window - VB6 and similar create several hidden 1x1 toplevels:
 DISPLAY=:10 xwininfo -root -tree | grep -v '1x1'
 ```
 
+## Building and testing in the lab
+
+It is a development machine as well as an analysis one.
+
+| Purpose | Tools |
+|---|---|
+| Build | `cmake`, `ninja`, `make`, `gcc`/`g++`, `clang`, `lld`, `ccache`, `pkg-config` |
+| Cross-build to Windows | `mingw-w64` — PE32+ output, run it with `re-run` |
+| Libraries | SDL2, OpenSSL, epoxy, GL, ALSA dev headers |
+| Source control | `git`, `git-lfs`, `gh` |
+
+Cross-compiling on Linux and running the result under Wine keeps the whole
+write-build-test loop inside the lab, which is the point for anything targeting
+a Windows binary.
+
+**GPU: OpenGL is real, Vulkan is not.** Inside the desktop OpenGL reports
+`D3D12 (<your GPU>)` with direct rendering, but the `dzn` ICD that maps Vulkan
+onto D3D12 is not installed, so Vulkan falls back to `lavapipe` in software.
+Do not assume the desktop can host Vulkan work.
+
+`gh auth login` has to be run by a human - nothing here scripts credentials.
+
 ## Snapshots
 
 ```powershell
