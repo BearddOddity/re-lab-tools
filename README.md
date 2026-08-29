@@ -17,6 +17,7 @@ Operating the lab itself.
 | `re-triage` | Pre-analysis report: hashes, entropy, PE sections, packer detection, imports, dynamically-resolved APIs, likely strings |
 | `re-run` | Run a Windows PE under Wine, picking the 32/64-bit prefix from the header |
 | `run-target` | Same but **blocks**, for GUI targets that must stay alive |
+| `re-clipsync` | Shares the clipboard between the nested desktop and Windows |
 | `ghidra-mcp-run` | Launch Ghidra in foreground mode |
 | `ghidra-mcp-start` | Cold start of the whole Ghidra MCP stack to a verified server |
 
@@ -98,7 +99,8 @@ Install by copying into `~/.claude/skills/` on the machine running Claude Code
 (they live on the Windows side, not in the lab):
 
 ```powershell
-Copy-Item D:e-lab-tools\skills\* $env:USERPROFILE\.claude\skills\ -Recurse -Force
+Copy-Item D:
+e-lab-tools\skills\* $env:USERPROFILE\.claude\skills\ -Recurse -Force
 ```
 
 ## solutions/
@@ -142,6 +144,33 @@ Wine prefixes. It prints the few steps that cannot be automated — the
 `D:\re-lab\restore.ps1` takes minutes rather than a full rebuild. Use this
 script when the snapshot is gone, or on a new machine.
 
+## windows/ - the app
+
+`Install.ps1` sets the lab up as an ordinary Windows application: Start-menu
+entry, icon, and a line in Apps & features. Per-user, no elevation.
+
+```powershell
+.\Install.ps1                       # %LOCALAPPDATA%\Programs\RE Lab
+.\Install.ps1 -InstallDir 'D:e-lab' -SnapshotDir 'D:e-lab\snapshots'
+.\Install.ps1 -LinkDistro           # move the distro inside the app folder
+```
+
+`-LinkDistro` uses `wsl --manage <distro> --move`, so the virtual disk ends up
+under the install directory and the app owns the machine rather than pointing at
+one registered elsewhere. Within a drive that is quick; across drives it copies
+every byte of a ~16 GB disk.
+
+The installer refuses to run if the distro is missing, rather than creating
+shortcuts that open nothing.
+
+`Uninstall.ps1` removes the shortcuts, the registry entry and the installed
+scripts, and deliberately keeps the snapshots and the distro - reporting both
+so they can be removed on purpose. It deletes a shortcut only after checking
+that it points at *its own* install directory. Name matching alone is not
+enough: an earlier revision matched on name, and a test run against redirected
+folders used a stale copy that predated the redirect and deleted the real
+shortcuts on the desktop instead.
+
 ## Making it feel like a desktop, not a tool
 
 `re-desktop` takes `fullscreen`, `portrait` (1080x1920), `wide`, `tall`, or an
@@ -167,6 +196,22 @@ explicit `WxH`. Shortcuts for the first two are created by
   desktop.
 - Apps installed with `apt` appear in the XFCE menu on their own, sound works
   through WSLg's PulseServer, and the network is shared with the host.
+- **systemd runs as PID 1**, via `[boot] systemd=true` in `wsl.conf`. Without it
+  WSL uses a minimal init and there are no services at all - no cron, no timers,
+  no NetworkManager, no printing, no container daemon - which is the practical
+  difference between a desktop and a working machine. It needs a full
+  `wsl --shutdown` to take effect; restarting the distro alone leaves
+  `systemctl` reporting `offline`.
+
+  `tpm-udev` is masked because WSL passes no TPM through, and that single
+  permanently-failing unit is enough to make the whole system report
+  `degraded`, which hides real failures behind constant noise.
+- **The clipboard is shared with Windows.** Xephyr's `:10` is a separate X
+  server from WSLg's `:0`, and only `:0` is bridged to Windows, so without help
+  the desktop's clipboard is an island - text copied inside Linux cannot be
+  pasted into Windows at all. `re-clipsync` polls both displays and copies
+  whichever changed to the other; `re-desktop` starts it and kills it with the
+  session.
 
 ## Things that will bite
 

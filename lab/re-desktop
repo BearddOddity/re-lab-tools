@@ -121,6 +121,12 @@ env -u WAYLAND_DISPLAY \
 
 SESSION_PID=$!
 
+# Bridge the clipboard between this nested display and WSLg's :0, which is the
+# one wired to Windows. Without it the desktop's clipboard is an island: text
+# copied in here cannot be pasted into Windows at all.
+setsid re-clipsync >/tmp/clipsync.log 2>&1 </dev/null &
+CLIP_PID=$!
+
 # Xephyr has no say in where its window lands, and it can open off-screen on a
 # multi-monitor setup - which looks exactly like "nothing happened". Nudge it
 # somewhere visible once the window manager inside has settled.
@@ -131,5 +137,5 @@ SESSION_PID=$!
 
 # When the desktop session ends, tear the nested server down with it.
 wait $SESSION_PID
-kill "$XEPHYR_PID" 2>/dev/null
+kill "$CLIP_PID" "$XEPHYR_PID" 2>/dev/null
 echo "Desktop closed."

@@ -15,3 +15,8 @@
 *.log
 dump*.bin
 opcodes.csv
+
+# Install-time state, never source
+snapshots/
+distro/
+windows/relab.config.ps1

@@ -41,6 +41,23 @@ cp "$SRC_DIR/provision/wsl.conf" /etc/wsl.conf
 cp "$SRC_DIR/provision/fstab" /etc/fstab
 mkdir -p /mnt/share
 
+# wsl.conf turns systemd on, which needs a full `wsl --shutdown` to take effect
+# - it changes PID 1, so a restart of the distro alone will not do it. Until
+# then systemctl reports "offline" and nothing below that touches a unit works.
+
+# ---------------------------------------------------------------- services
+# Only reachable once systemd is PID 1 (see wsl.conf above). Skipped rather than
+# failed when it is not, so a first pass before `wsl --shutdown` still completes.
+if [ "$(systemctl is-system-running 2>/dev/null)" != "offline" ]; then
+    say "services"
+    # tpm-udev fails on every boot because WSL passes no TPM through, and one
+    # failed unit is enough to make systemctl report the whole system as
+    # "degraded" - which hides real failures behind permanent noise.
+    systemctl mask tpm-udev.path tpm-udev.service >/dev/null 2>&1 || true
+    systemctl enable --now cron >/dev/null 2>&1 || true
+    systemctl reset-failed >/dev/null 2>&1 || true
+fi
+
 # ---------------------------------------------------------------- packages
 say "packages"
 export DEBIAN_FRONTEND=noninteractive

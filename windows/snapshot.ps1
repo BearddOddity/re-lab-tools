@@ -3,8 +3,9 @@
 param([string]$Name = "")
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'relab-common.ps1')
 $distro = 'kali-linux'
-$dir = Join-Path $PSScriptRoot 'snapshots'
+$dir = $SnapshotDir
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
 $stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'

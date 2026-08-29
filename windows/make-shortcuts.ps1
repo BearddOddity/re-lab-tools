@@ -1,9 +1,16 @@
 # Creates the RE lab shortcuts on the Desktop and in the Start menu.
 # Re-runnable: it overwrites its own shortcuts and touches nothing else.
+# -DesktopDir / -StartMenuDir exist so the installer can be exercised without
+# overwriting the real shortcuts on someone's desktop.
+param(
+    [string]$DesktopDir = [Environment]::GetFolderPath('Desktop'),
+    [string]$StartMenuDir = (Join-Path ([Environment]::GetFolderPath('Programs')) 'RE Lab')
+)
 $ErrorActionPreference = 'Stop'
 
-$desktop = [Environment]::GetFolderPath('Desktop')
-$startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'RE Lab'
+$desktop = $DesktopDir
+$startMenu = $StartMenuDir
+New-Item -ItemType Directory -Force -Path $desktop | Out-Null
 New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
 
 $sys = "$env:SystemRoot\System32"

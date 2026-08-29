@@ -10,9 +10,10 @@
 param([string]$File = "")
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'relab-common.ps1')
 $distro = 'kali-linux'
-$dir = Join-Path $PSScriptRoot 'snapshots'
-$target = Join-Path $PSScriptRoot 'distro'
+$dir = $SnapshotDir
+$target = $DistroDir
 
 if (-not $File) {
     $snaps = @(Get-ChildItem -Path $dir -Filter *.tar -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)

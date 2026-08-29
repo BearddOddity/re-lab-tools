@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Keep the clipboard shared between the nested desktop and Windows.
+
+Xephyr on :10 is a separate X server from WSLg's :0, and only :0 is bridged to
+the Windows clipboard. Without this, text copied inside the Linux desktop cannot
+be pasted into Windows, or the other way round - the two clipboards are simply
+unrelated. Demonstrated directly: with "CLIPTEST-FROM-10" set on :10, reading :0
+returned whatever was sitting in the Windows clipboard at the time.
+
+So this polls both displays and copies whichever one changed to the other. There
+is no X event for "the selection owner changed on another display", so polling is
+the mechanism available; at twice a second the cost is not measurable.
+
+Started by re-desktop and dies with it. Run by hand for debugging:
+
+    DEBUG=1 re-clipsync
+"""
+import os
+import subprocess
+import sys
+import time
+
+DISPLAYS = (":0", ":10")
+POLL = 0.5
+MAX_BYTES = 1 << 20      # skip anything huge; this is for text, not payloads
+DEBUG = bool(os.environ.get("DEBUG"))
+
+
+def log(*a):
+    if DEBUG:
+        print(*a, file=sys.stderr, flush=True)
+
+
+def _env(display):
+    env = dict(os.environ)
+    env["DISPLAY"] = display
+    env.pop("WAYLAND_DISPLAY", None)
+    return env
+
+
+def get(display):
+    """Current clipboard text, b'' if empty, or None if the display is unusable."""
+    try:
+        p = subprocess.run(["xclip", "-selection", "clipboard", "-o"],
+                           env=_env(display), capture_output=True, timeout=3)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if p.returncode != 0:
+        # An empty selection also exits non-zero, which is not an error worth
+        # distinguishing - either way there is nothing to propagate.
+        return b""
+    return p.stdout
+
+
+def put(display, data):
+    """Set the clipboard on `display`.
+
+    xclip forks a child to serve the selection and that child inherits stdout.
+    If stdout is a pipe the caller waits for an EOF that never comes - which is
+    exactly how this hung for two minutes the first time. Hence DEVNULL and a
+    session of its own.
+    """
+    try:
+        proc = subprocess.Popen(["xclip", "-selection", "clipboard", "-i"],
+                                env=_env(display), stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        proc.communicate(data, timeout=5)
+        return True
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def main():
+    # Seed from the current state so the first poll does not treat whatever is
+    # already on the clipboard as a fresh copy and bounce it around.
+    last = {d: (get(d) or b"") for d in DISPLAYS}
+    log("seeded", {d: len(v) for d, v in last.items()})
+
+    while True:
+        for src in DISPLAYS:
+            cur = get(src)
+            if cur is None:          # display gone (desktop not up yet, or closed)
+                continue
+            if cur == last[src] or not cur or len(cur) > MAX_BYTES:
+                last[src] = cur if cur is not None else last[src]
+                continue
+
+            dst = DISPLAYS[1] if src == DISPLAYS[0] else DISPLAYS[0]
+            if get(dst) is None:
+                continue
+            log(f"{src} -> {dst}: {len(cur)} bytes")
+            if put(dst, cur):
+                # Record on BOTH sides. Without this the destination looks
+                # changed on the next pass and gets copied straight back, and
+                # the two clipboards ping-pong forever.
+                last[src] = cur
+                last[dst] = cur
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
