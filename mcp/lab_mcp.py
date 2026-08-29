@@ -236,7 +236,17 @@ def lab_r2(path: str, commands: str, analyse: bool = True) -> str:
         analyse: run 'aaa' first so functions exist (slower on big binaries)
     """
     script = ("aaa;" if analyse else "") + commands
-    return run(["bash", "-lc", f"r2 -q -c \"{script}\" '{path}' 2>&1 | head -300"],
+    # scr.color=0 strips ANSI. The rest of the noise - "Analyze all flags",
+    # "Function already defined" once per function - is on stderr and is not
+    # gated by log.level, so drop stderr and keep stdout, which is just the
+    # answer. Merging the two buries a five-line result in three hundred lines
+    # of commentary. stderr is still the fallback: r2 reports a bad path there
+    # and exits with an empty stdout, which would otherwise read as "no results".
+    cmd = (f"r2 -q -e scr.color=0 -c \"{script}\" '{path}' 2>/tmp/r2.err")
+    return run(["bash", "-lc",
+                f'out=$({cmd}); '
+                f'if [ -n "$out" ]; then printf "%s\n" "$out" | head -300; '
+                f'else echo "(no stdout; r2 stderr follows)"; head -20 /tmp/r2.err; fi'],
                timeout=600)
 
 
