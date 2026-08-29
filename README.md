@@ -42,6 +42,10 @@ Operating the lab itself.
 | `ExportAnalysis.java` | Ghidra script — exports names, prototypes and labels as diffable text |
 | `ApplyAnalysis.java` | Ghidra script — re-applies an export to a freshly imported program |
 | `NameVtableStorers.java` | Ghidra script — names constructors/destructors by the vtable pointer they store |
+| `ProximityCluster.java` | Ghidra script — infers class membership from neighbouring functions (93% accurate) |
+| `ProximityValidate.java` | Ghidra script — measures that heuristic against functions whose class is known |
+| `CallGraphAffiliate.java` | Ghidra script — infers class from unanimous callers. **81% — measured and rejected** |
+| `CallGraphValidate.java` | Ghidra script — the accuracy check that rejected it |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -239,6 +243,32 @@ naming it a constructor would be a guess presented as a fact.
 constructor usually has its base constructors inlined, so base vtables are
 stored first and the class's own last - the store at the highest instruction
 address names the function. 92 of the 634 stored more than one.
+
+### Measure a heuristic before letting it name anything
+
+Three inference heuristics were tried on the functions RTTI cannot reach. Each
+was validated the same way - apply it to functions whose class IS known and see
+how often it agrees - because otherwise the output is an unmeasured guess that
+everything downstream will trust.
+
+| heuristic | accuracy | assigned | verdict |
+|---|---|---|---|
+| Proximity - unnamed function between two of the same class | **93%** | 706 + 1,125 | applied |
+| Call graph - unanimous named callers | **81%** | 241 | **rejected** |
+| Alchemy `ig*` metaclass records | n/a | ~30 | not worth it |
+
+Call-graph propagation was rejected on the measurement, not on a feeling: one
+name in five would be wrong. Tightening it did not rescue it either - requiring
+3 callers gave 79% and 4 gave 83%, on shrinking samples. Some heuristics are
+simply weak, and the check is what tells you which.
+
+The `ig*` metaclass route looked promising - 842 name strings - but only 189 are
+referenced by a pointer at all and only 30 of those have a function pointer
+nearby. The structure is there (`igMetaObject` appears) but pinning down the
+record layout needs Alchemy documentation.
+
+Names from an inference say so: `Class::near_<addr>` for proximity, never
+something that reads like a real method name.
 
 ### Keep the analysis in git, not the project
 
