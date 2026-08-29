@@ -81,6 +81,26 @@ where those scripts were only ever copied into a working directory, every one of
 those tools answers "No such file or directory" — which reads as a broken MCP
 rather than a missing install.
 
+## skills/
+
+The Claude Code skills written alongside this tooling. They are the operating
+knowledge that `provision/rebuild-lab.sh` cannot restore — the script brings the
+lab back, these describe how to drive it and what has already gone wrong.
+
+| Skill | Covers |
+|---|---|
+| `re-lab-ops` | Running the lab: the desktop, `re-ctl`, the MCP tool inventory, snapshots, and the traps that have cost real time |
+| `ghidra-mcp-usage` | Driving Ghidra through its MCP — loading a binary, picking the right tool, annotating as you go |
+| `crackme-workflow` | The order to work a crackme in: triage, locate the check, understand it, derive, verify, record |
+| `anti-debug-reference` | Anti-debug and obfuscation techniques, how each looks in a disassembler, and how to defeat it |
+
+Install by copying into `~/.claude/skills/` on the machine running Claude Code
+(they live on the Windows side, not in the lab):
+
+```powershell
+Copy-Item D:e-lab-tools\skills\* $env:USERPROFILE\.claude\skills\ -Recurse -Force
+```
+
 ## solutions/
 
 Per-target keygens, kept as worked examples.
