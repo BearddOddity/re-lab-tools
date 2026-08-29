@@ -20,3 +20,6 @@ opcodes.csv
 snapshots/
 distro/
 windows/relab.config.ps1
+
+# Generated Ghidra type archives - rebuild from the headers instead
+*.gdt

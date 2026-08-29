@@ -34,6 +34,8 @@ Operating the lab itself.
 | `mem-strings.py` | UTF-16LE strings from a live process, with addresses |
 | `catch-vbastrcmp` | Break on `msvbvm60!__vbaStrCmp` and log both arguments |
 | `ApplyXbSymbols.java` | Ghidra script — applies XbSymbolDatabase output (`NAME = 0xADDR`) to the open program |
+| `ParseXboxHeaders.java` | Ghidra script — parses the flattened Xbox SDK header into data types, and writes a reusable `.gdt` |
+| `ApplyXboxSignatures.java` | Ghidra script — gives the named SDK functions their real prototypes |
 
 ### pcode-dis.py needs the opcode table
 
@@ -132,6 +134,44 @@ analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptP
 A signature match is worth less than a name a person chose, so the script leaves
 any non-default function name alone and attaches the SDK name as a secondary
 label instead of overwriting it.
+
+### Xbox SDK data types
+
+Ghidra ships `win32` type archives and nothing for Xbox, so XAPI and D3D8 calls
+decompile as `undefined4 param_1` with no calling convention. The
+`xbox-includes` project fixes that, and its own Makefile does the hard part -
+Ghidra's C parser is not a full preprocessor, so feed it one flat file rather
+than fighting include paths:
+
+```bash
+gcc -o xbox.h -x c -P -E -Iinclude xbox.cpp     # ~7k lines, no includes left
+```
+
+GCC cannot COMPILE the result - `__stdcall` is an MSVC keyword - but that does
+not matter and the error is not a problem to fix: Ghidra's parser understands
+those annotations, and they are what carries the calling convention across.
+
+Then, in order:
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript ParseXboxHeaders.java xbox.h xbox_sdk.gdt
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript ApplyXboxSignatures.java symbols.txt
+```
+
+The second step is the one that pays. XbSymbolDatabase says *which* function an
+address is; the headers say what its arguments are. Either alone changes little
+- a name still decompiles with `undefined4` parameters, and a signature with no
+address has nothing to attach to. Joined, a function goes from
+
+    undefined4 FUN_0035d900(undefined4 param_1, undefined4 param_2)
+
+to
+
+    void __fastcall D3D8__D3DDevice_SetRenderState_Simple(DWORD Method, DWORD Value)
+
+Measured on X-Men Legends: 2,084 types parsed, program types 97 -> 2,161, and
+142 of 344 symbols got real prototypes. The rest are data symbols (67) or
+internal SDK functions that no public header declares (129).
 
 ## solutions/
 
