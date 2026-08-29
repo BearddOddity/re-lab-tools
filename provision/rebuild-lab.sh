@@ -115,6 +115,11 @@ if [ "$(systemctl is-system-running 2>/dev/null)" != "offline" ]; then
     # failed unit is enough to make systemctl report the whole system as
     # "degraded" - which hides real failures behind permanent noise.
     systemctl mask tpm-udev.path tpm-udev.service >/dev/null 2>&1 || true
+    # accounts-daemon cannot start either: it needs /run/systemd/seats, and
+    # logind creates no seats under WSL because there is no session hardware.
+    # It serves display-manager greeters, and this desktop launches XFCE
+    # directly, so nothing here wants it.
+    systemctl mask accounts-daemon.service >/dev/null 2>&1 || true
     systemctl enable --now cron >/dev/null 2>&1 || true
     systemctl reset-failed >/dev/null 2>&1 || true
 fi
