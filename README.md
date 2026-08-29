@@ -90,6 +90,7 @@ Per-target keygens, kept as worked examples.
 | `keygen01.py` | `crackme01` — self-authored pipeline test |
 | `solve_prime.py` | `prime.exe` (crackmes.one) — inverts `pow(129, char, 251)` then XOR |
 | `keygen_bfcrackme40.py` | `BFCrackMe40` (crackmes.one) — VB6 P-code; string-range check |
+| `keygen_keygenme2.py` | `Keygen #2 by Nicohogtag` (crackmes.one) — MinGW C++; STABS symbols, and a check that reads two bytes past its input buffer |
 
 ## Rebuilding the lab elsewhere
 
