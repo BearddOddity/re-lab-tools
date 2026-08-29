@@ -8,7 +8,20 @@
 set -u
 
 DISP=":10"
-SIZE="${1:-1600x900}"
+# "fullscreen" gives a real desktop filling the monitor; otherwise WxH.
+SIZE="${1:-1920x1080}"
+XEPHYR_MODE=(-screen "$SIZE")
+if [ "$SIZE" = "fullscreen" ] || [ "$SIZE" = "-fullscreen" ]; then
+    XEPHYR_MODE=(-fullscreen)
+fi
+
+# Mesa defaults to llvmpipe (software rendering) in WSL even though /dev/dxg
+# and the d3d12 Gallium driver are both present, which is why WSLg labels the
+# window "[WARN:COPY MODE]". Pointing Gallium at d3d12 hands rendering to the
+# real GPU - verified as
+#     OpenGL renderer string: D3D12 (AMD Radeon RX 7600 XT)
+# rather than llvmpipe. Override by setting GALLIUM_DRIVER before calling.
+export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
 
 if [ -z "${DISPLAY:-}" ]; then
     echo "No DISPLAY. WSLg is not running; try 'wsl --shutdown' on Windows and reopen." >&2
@@ -59,13 +72,13 @@ fi
 # remove /tmp/.X10-lock", and it survives any unclean kill.
 rm -f "/tmp/.X11-unix/X${DISP#:}" "/tmp/.X${DISP#:}-lock"
 
-echo "Starting XFCE in a ${SIZE} window..."
+echo "Starting XFCE (${SIZE})..."
 # -host-cursor draws the host's own cursor rather than a synthesised one, which
 # keeps the visible pointer and the pointer Xephyr thinks it has in agreement.
 # -no-host-grab is deliberately NOT used: without grabbing, clicks from Windows
 # were landing wherever Xephyr last believed the pointer to be, so panel buttons
 # appeared dead while synthesised X clicks worked fine.
-Xephyr "$DISP" -screen "$SIZE" -resizeable -host-cursor -title "Kali Desktop (RE Lab)" >/tmp/xephyr.log 2>&1 &
+Xephyr "$DISP" "${XEPHYR_MODE[@]}" -resizeable -host-cursor -title "Kali Desktop (RE Lab)" >/tmp/xephyr.log 2>&1 &
 XEPHYR_PID=$!
 
 # Wait for the nested server to accept connections before starting the session.
