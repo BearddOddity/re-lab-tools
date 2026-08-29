@@ -46,6 +46,9 @@ Operating the lab itself.
 | `ProximityValidate.java` | Ghidra script — measures that heuristic against functions whose class is known |
 | `CallGraphAffiliate.java` | Ghidra script — infers class from unanimous callers. **81% — measured and rejected** |
 | `CallGraphValidate.java` | Ghidra script — the accuracy check that rejected it |
+| `DecompileUnnamed.java` | Ghidra script — batch-decompiles the largest unnamed functions with call context |
+| `DecompileList.java` | Ghidra script — batch-decompiles a given list of addresses |
+| `NameByStringXref.java` | Ghidra script — names functions from the string constants they reference |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -244,6 +247,49 @@ constructor usually has its base constructors inlined, so base vtables are
 stored first and the class's own last - the store at the highest instruction
 address names the function. 92 of the 634 stored more than one.
 
+### Statically linked libraries you can name exactly
+
+A game binary usually contains third-party libraries whose names are public. In
+X-Men Legends: **zlib 1.1.3** (`inflate 1.1.3 Copyright 1995-1998 Mark Adler`)
+and **TinyXML** (`TiXmlDocument`, `TiXmlElement`, `TiXmlAttribute` as RTTI
+classes). Those are exact identifications, not inference.
+
+`NameByStringXref.java` names a function from a string it references - a rule
+file of `name<TAB>literal`. It reaches what RTTI and proximity cannot:
+non-virtual, non-member code with no useful neighbours.
+
+**It works less often than it looks like it should.** zlib keeps its diagnostics
+in a `z_errmsg[]` table that several functions index, so `"invalid
+literal/length code"` was referenced by four functions and named none - the
+reference cannot say which one owns it. Of ten zlib rules, one named a function
+and seven were ambiguous. The script reports ambiguity rather than picking a
+winner.
+
+The lesson generalises: a string identifies a function only when the compiler
+put it in that function's code path, not in a shared table.
+
+### Decompiling the remainder
+
+Once the automatic sources are spent, what is left needs reading. Batch
+decompilation makes that practical - the expensive part happens once, unattended,
+and each entry carries its callers and callees, which usually identify a function
+faster than its body does.
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts     -postScript DecompileUnnamed.java out.c 12 600     # 12 largest over 600 bytes
+analyzeHeadless ... -postScript DecompileList.java addrs.txt out.c
+```
+
+**Target the game bucket, not just "largest".** The three biggest unknowns in
+this binary turned out to be a bit-stream decoder - zlib, library code nobody
+needs named. Filtering by the classification first put real gameplay functions
+at the top instead.
+
+Name from evidence and claim no more than that. `FUN_00062f10` copies a string,
+scans for a `%END%` marker and pulls replacements from the resource manager: it
+is `ExpandTextMacros_PercentEnd`. Its callers are `CBlock` virtuals, but `this`
+being a `CBlock` is inference, so no class prefix was claimed.
+
 ### Measure a heuristic before letting it name anything
 
 Three inference heuristics were tried on the functions RTTI cannot reach. Each
@@ -390,7 +436,7 @@ code is not Xbox platform code; presence in an unrelated title on the same
 engine means it is not this game's logic.
 
 X-Men Legends, against X-Men Legends II (Xbox), Marvel: Ultimate Alliance
-(Xbox) and X-Men Legends II (PC) - all XDK 5849, all Intrinsic Alchemy:
+(Xbox) and X-Men Legends II (PC) - all XDK 5849, all Vicarious Visions Alchemy:
 
 | bucket | functions | |
 |---|---|---|
@@ -459,7 +505,7 @@ only when the hash matches exactly one function on each side - a one-to-many
 match cannot say which candidate it belongs to, and guessing plants a wrong name
 that later work would trust.
 
-### The engine is Intrinsic Alchemy, not a Raven engine
+### The engine is Vicarious Visions Alchemy, not a Raven engine
 
 Worth knowing before hunting for documentation. Both games carry `ig*` class
 names as plain strings - 693 unique in X-Men Legends, 490 in Legends II, 208 in
