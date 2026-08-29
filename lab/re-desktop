@@ -1,0 +1,107 @@
+#!/bin/bash
+# Opens the full XFCE desktop in a single window.
+#
+# Xephyr is a nested X server: it draws an entire X display inside one window,
+# and that window is handed to Windows by WSLg like any other GUI app. So the
+# desktop needs no RDP server, no Windows-side client, and no password. Nothing
+# inside Linux has to reach a Windows binary, which is what keeps the lab sealed.
+set -u
+
+DISP=":10"
+SIZE="${1:-1600x900}"
+
+if [ -z "${DISPLAY:-}" ]; then
+    echo "No DISPLAY. WSLg is not running; try 'wsl --shutdown' on Windows and reopen." >&2
+    exit 1
+fi
+
+# WSLg's own X socket. It disappears when the distro is terminated - which
+# 'wsl --terminate' and the snapshot script both do - and only a full
+# 'wsl --shutdown' rebuilds it. Without this check Xephyr fails with the
+# unhelpful "cannot open host display", which sends you looking in the wrong
+# place entirely.
+if [ ! -e /tmp/.X11-unix/X0 ]; then
+    echo "WSLg's X socket (/tmp/.X11-unix/X0) is missing, so no GUI can start." >&2
+    echo "Run this on WINDOWS, then try again:" >&2
+    echo "    wsl --shutdown" >&2
+    echo "A 'wsl --terminate' is not enough - it does not rebuild WSLg." >&2
+    exit 1
+fi
+
+# WSLg mounts /tmp/.X11-unix read-only and without the sticky bit, so a nested X
+# server cannot create its display socket there. Remount it read-write. Doing it
+# here rather than in wsl.conf's [boot] hook, which runs before WSLg mounts the
+# directory and is therefore overwritten. WSLg's own X0 socket is unaffected.
+# Test by actually writing. After a fresh boot the directory is mode 777 but the
+# mount is read-only, so `test -w` reports it writable and the remount gets
+# skipped - then Xephyr cannot create its socket and the desktop never appears.
+writable() { touch /tmp/.X11-unix/.wtest 2>/dev/null && rm -f /tmp/.X11-unix/.wtest; }
+
+if ! writable; then
+    sudo mount -o remount,rw /tmp/.X11-unix 2>/dev/null
+    sudo chmod 1777 /tmp/.X11-unix 2>/dev/null
+fi
+if ! writable; then
+    echo "Could not make /tmp/.X11-unix writable; the nested desktop cannot start." >&2
+    exit 1
+fi
+
+# Already up? Test for the running server, not for its socket file: stopping the
+# desktop leaves a stale socket behind, and trusting that made this launcher exit
+# silently without opening anything.
+if pgrep -f "Xephyr ${DISP} " >/dev/null 2>&1; then
+    echo "A desktop is already running on ${DISP}. Close its window first, or run: re-desktop-stop"
+    exit 0
+fi
+
+# No server running, so anything left over is stale. Both files must go: the lock
+# is what makes X refuse to start with "if this server is no longer running,
+# remove /tmp/.X10-lock", and it survives any unclean kill.
+rm -f "/tmp/.X11-unix/X${DISP#:}" "/tmp/.X${DISP#:}-lock"
+
+echo "Starting XFCE in a ${SIZE} window..."
+# -host-cursor draws the host's own cursor rather than a synthesised one, which
+# keeps the visible pointer and the pointer Xephyr thinks it has in agreement.
+# -no-host-grab is deliberately NOT used: without grabbing, clicks from Windows
+# were landing wherever Xephyr last believed the pointer to be, so panel buttons
+# appeared dead while synthesised X clicks worked fine.
+Xephyr "$DISP" -screen "$SIZE" -resizeable -host-cursor -title "Kali Desktop (RE Lab)" >/tmp/xephyr.log 2>&1 &
+XEPHYR_PID=$!
+
+# Wait for the nested server to accept connections before starting the session.
+for _ in $(seq 1 40); do
+    [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break
+    sleep 0.25
+done
+if ! kill -0 "$XEPHYR_PID" 2>/dev/null; then
+    echo "Xephyr failed to start. Log:" >&2
+    cat /tmp/xephyr.log >&2
+    exit 1
+fi
+
+# WSLg exports WAYLAND_DISPLAY, and GTK prefers Wayland whenever it is set. That
+# sends the panel, the desktop and every GTK app to WSLg's own compositor instead
+# of into this nested X display, leaving the window black with only the X11-only
+# window manager inside it. Strip the Wayland environment so the whole session
+# lands on :10.
+env -u WAYLAND_DISPLAY \
+    DISPLAY="$DISP" \
+    GDK_BACKEND=x11 \
+    QT_QPA_PLATFORM=xcb \
+    XDG_SESSION_TYPE=x11 \
+    dbus-run-session -- xfce4-session >/tmp/xfce-session.log 2>&1 &
+
+SESSION_PID=$!
+
+# Xephyr has no say in where its window lands, and it can open off-screen on a
+# multi-monitor setup - which looks exactly like "nothing happened". Nudge it
+# somewhere visible once the window manager inside has settled.
+( sleep 6
+  WID=$(DISPLAY=:0 xdotool search --name "Kali Desktop (RE Lab)" 2>/dev/null | head -1)
+  [ -n "$WID" ] && DISPLAY=:0 xdotool windowmove "$WID" 80 60 windowactivate "$WID" 2>/dev/null
+) &
+
+# When the desktop session ends, tear the nested server down with it.
+wait $SESSION_PID
+kill "$XEPHYR_PID" 2>/dev/null
+echo "Desktop closed."

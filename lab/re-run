@@ -1,0 +1,85 @@
+#!/bin/bash
+# re-run - run a Windows PE under Wine with the right prefix for its architecture.
+#
+#   re-run /mnt/share/crackme01.exe [args...]
+#
+# Picks 32- or 64-bit from the PE header. Getting this wrong is the usual cause
+# of "it just exits" or a confusing loader error: most crackmes are 32-bit, and
+# a 64-bit prefix cannot run them.
+#
+# Prefixes are created on first use:
+#   ~/.wine32  WINEARCH=win32
+#   ~/.wine64  WINEARCH=win64
+set -u
+
+if [ $# -lt 1 ]; then
+    sed -n '2,12p' "$0" | sed 's/^# \?//'
+    exit 1
+fi
+
+TARGET="$1"; shift
+
+if [ ! -f "$TARGET" ]; then
+    echo "re-run: not a file: $TARGET" >&2
+    exit 1
+fi
+
+# --- refuse to run what is not a PE ---------------------------------------
+magic=$(head -c 2 "$TARGET")
+if [ "$magic" != "MZ" ]; then
+    echo "re-run: $TARGET is not a Windows PE (no MZ header)." >&2
+    echo "        Native Linux binaries run directly; Wine is not involved." >&2
+    exit 1
+fi
+
+# --- 32 or 64 bit ----------------------------------------------------------
+# Read the machine field from the COFF header: 0x014c = i386, 0x8664 = x86-64.
+ARCHBITS=$(python3 - "$TARGET" <<'PY'
+import struct, sys
+with open(sys.argv[1], "rb") as f:
+    data = f.read(0x400)
+try:
+    pe_off = struct.unpack_from("<I", data, 0x3C)[0]
+    machine = struct.unpack_from("<H", data, pe_off + 4)[0]
+except Exception:
+    print("unknown"); raise SystemExit
+print({0x014c: "32", 0x8664: "64"}.get(machine, "unknown"))
+PY
+)
+
+case "$ARCHBITS" in
+    32) export WINEARCH=win32; export WINEPREFIX="$HOME/.wine32"; WINE=wine ;;
+    64) export WINEARCH=win64; export WINEPREFIX="$HOME/.wine64"; WINE=wine ;;
+    *)  echo "re-run: could not determine PE architecture; refusing to guess." >&2
+        exit 1 ;;
+esac
+
+echo "re-run: ${ARCHBITS}-bit PE, prefix $WINEPREFIX"
+
+# --- one-time prefix setup -------------------------------------------------
+if [ ! -d "$WINEPREFIX" ]; then
+    echo "re-run: creating $WINEARCH prefix (first run only, takes a minute)"
+    # Skip the mono/gecko download prompts; they are irrelevant for a crackme
+    # and pop modal dialogs that block an unattended run.
+    WINEDLLOVERRIDES="mscoree,mshtml=" WINEDEBUG=-all \
+        wineboot -u >/tmp/wineboot.log 2>&1
+    if [ $? -ne 0 ]; then
+        echo "re-run: prefix creation failed; see /tmp/wineboot.log" >&2
+        exit 1
+    fi
+fi
+
+# --- run -------------------------------------------------------------------
+# Wine executes with this user's privileges on a machine that shares your
+# network. Fine for a challenge from a source you trust; for an unknown binary
+# use a Hyper-V VM with networking off instead.
+echo "re-run: executing $(basename "$TARGET") - Ctrl+C to stop"
+echo
+
+WINEDEBUG="${WINEDEBUG:--all}" WINEDLLOVERRIDES="mscoree,mshtml=" \
+    "$WINE" "$TARGET" "$@"
+rc=$?
+
+echo
+echo "re-run: exited with code $rc"
+exit "$rc"

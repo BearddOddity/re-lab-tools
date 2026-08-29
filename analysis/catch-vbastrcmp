@@ -1,0 +1,93 @@
+#!/bin/bash
+# catch-vbastrcmp - break on msvbvm60!__vbaStrCmp in a running VB6 target and
+# log both arguments. BLOCKS, so launch it from Windows with Start-Process:
+#
+#   Start-Process wsl.exe -ArgumentList '-d','kali-linux','-u','root','--','catch-vbastrcmp','BFCrackMe40.exe'
+#
+# VB6 P-code cannot be read as x86, so the practical way to see what a serial
+# is compared against is to catch the runtime's string comparison and read the
+# two BSTRs. One is what you typed; the other is the answer.
+#
+# Runs as root deliberately: root has CAP_SYS_PTRACE, so this works with
+# kernel.yama.ptrace_scope left at its default. Do not weaken that setting.
+set -u
+
+TARGET="${1:-BFCrackMe40.exe}"
+LOG="${2:-/mnt/share/strcmp.log}"
+
+python3 - "$TARGET" > /tmp/catch-gen.gdb <<'PY'
+import os, sys
+import pefile
+
+target = sys.argv[1]
+
+pid = None
+for e in os.listdir("/proc"):
+    if not e.isdigit():
+        continue
+    try:
+        cmd = open(f"/proc/{e}/cmdline", "rb").read().decode("latin-1")
+    except OSError:
+        continue
+    if target in cmd and "catch-vbastrcmp" not in cmd and "python3" not in cmd:
+        pid = e
+        break
+if not pid:
+    sys.exit(f"no process matching {target}")
+
+base = None
+dll = None
+for line in open(f"/proc/{pid}/maps"):
+    if "msvbvm60" in line.lower() and "r-xp" in line:
+        base = int(line.split("-")[0], 16)
+        dll = line.split()[-1]
+        break
+if base is None:
+    sys.exit("msvbvm60.dll is not mapped in that process")
+
+pe = pefile.PE(dll, fast_load=True)
+pe.parse_data_directories(
+    directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]])
+rva = None
+for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+    if exp.name == b"__vbaStrCmp":
+        rva = exp.address
+        break
+if rva is None:
+    sys.exit("__vbaStrCmp not found in exports")
+
+addr = base + rva
+sys.stderr.write(f"pid {pid}, msvbvm60 base 0x{base:08x}, "
+                 f"__vbaStrCmp at 0x{addr:08x}\n")
+print(f"# pid {pid}")
+print("set pagination off")
+print("set confirm off")
+print("set logging file %s" % os.environ.get("CATCH_LOG", "/mnt/share/strcmp.log"))
+print("set logging overwrite on")
+print("set logging enabled on")
+print(f"break *0x{addr:x}")
+print("""commands
+silent
+printf "=== __vbaStrCmp\\n"
+set $a = *(unsigned int *)($esp + 4)
+set $b = *(unsigned int *)($esp + 8)
+printf "arg1 0x%08x len %d\\n", $a, *(unsigned int *)($a - 4)
+x/40hx $a
+printf "arg2 0x%08x len %d\\n", $b, *(unsigned int *)($b - 4)
+x/40hx $b
+continue
+end""")
+print("continue")
+PY
+
+rc=$?
+if [ $rc -ne 0 ]; then
+    echo "catch-vbastrcmp: setup failed" >&2
+    exit $rc
+fi
+
+PID=$(grep -m1 '^# pid' /tmp/catch-gen.gdb | awk '{print $3}')
+echo "catch-vbastrcmp: attaching to pid $PID, logging to $LOG"
+
+# stdin from a pipe that never closes, so gdb does not read EOF and detach.
+sleep infinity | gdb -p "$PID" -x /tmp/catch-gen.gdb

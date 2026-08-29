@@ -1,0 +1,201 @@
+#!/bin/bash
+# Bring the whole Ghidra MCP stack up from cold, then block.
+#
+#   desktop (Xephyr + XFCE)  ->  Ghidra 12.1.3  ->  one CodeBrowser  ->  port 8080
+#
+# Blocks on purpose. Launch it from Windows with:
+#   Start-Process wsl.exe -ArgumentList '-d','kali-linux','--','ghidra-mcp-start'
+# and leave it running. wsl.exe kills a session's processes when it returns, so
+# something must stay in the foreground or the JVM dies seconds later.
+set -u
+
+DISP=":10"
+GHIDRA=/opt/ghidra_12.1.3_PUBLIC
+
+# WSLg's own display. Xephyr is a client of it - it needs the HOST display to
+# create its window, and only the things running *inside* the nested desktop
+# should point at :10. Exporting DISPLAY=:10 up here makes Xephyr try to open
+# the display it is supposed to be creating, and it fails with
+# "Xephyr cannot open host display".
+HOST_DISPLAY="${DISPLAY:-:0}"
+
+log() { echo "[ghidra-mcp-start] $*"; }
+
+wait_for() {  # wait_for <seconds> <command...>
+    local limit=$1; shift
+    local i=0
+    while [ "$i" -lt "$limit" ]; do
+        if "$@" >/dev/null 2>&1; then return 0; fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# ---- 1. desktop -----------------------------------------------------------
+# A half-dead desktop - Xephyr alive but the session inside it gone - is worse
+# than no desktop, because everything downstream computes wrong coordinates
+# against undecorated windows. Tear it down and start clean.
+if pgrep -f "Xephyr ${DISP} " >/dev/null 2>&1 && ! pgrep -f "xfwm4" >/dev/null 2>&1; then
+    log "desktop is half-started (Xephyr up, no session) - restarting it"
+    re-desktop-stop >/dev/null 2>&1
+    sleep 3
+fi
+
+if ! pgrep -f "Xephyr ${DISP} " >/dev/null 2>&1; then
+    log "starting desktop"
+    DISPLAY="$HOST_DISPLAY" re-desktop 1400x900 >/tmp/desk.log 2>&1 &
+    if ! wait_for 45 pgrep -f "Xephyr ${DISP} "; then
+        log "FAILED: desktop did not start; see /tmp/desk.log and /tmp/xephyr.log"
+        exit 1
+    fi
+else
+    log "desktop already running"
+fi
+
+# Xephyr being up is NOT the same as the desktop being usable. Without xfwm4
+# there are no window decorations, so window geometry comes back without the
+# title bar and every coordinate derived from it is wrong. Wait for the window
+# manager and the panel, not just the X server.
+if ! wait_for 60 pgrep -f "xfwm4"; then
+    log "FAILED: window manager never started inside the desktop"
+    exit 1
+fi
+if ! wait_for 60 pgrep -f "xfce4-panel"; then
+    log "FAILED: xfce4-panel never started inside the desktop"
+    exit 1
+fi
+log "desktop ready (xfwm4 + panel up)"
+
+# Everything from here on talks to the nested desktop.
+export DISPLAY="$DISP"
+
+# ---- 2. ghidra ------------------------------------------------------------
+if pgrep -f "ghidra.GhidraRun" >/dev/null 2>&1; then
+    log "ghidra already running"
+else
+    log "starting ghidra (foreground launcher)"
+    env -u WAYLAND_DISPLAY DISPLAY="$DISP" GDK_BACKEND=x11 \
+        "$GHIDRA/support/launch.sh" fg jdk Ghidra "" "" ghidra.GhidraRun \
+        >/tmp/ghidra.log 2>&1 &
+    GHIDRA_PID=$!
+    if ! wait_for 90 pgrep -f "ghidra.GhidraRun"; then
+        log "FAILED: ghidra did not start; see /tmp/ghidra.log"
+        exit 1
+    fi
+fi
+
+# Does the server actually answer? A listening socket is not proof: during a
+# restart the old instance can still hold 8080 for a moment, and its leftover
+# CodeBrowser window is still mapped. Trusting either made this script report
+# READY against an instance that was in the middle of dying.
+server_ok() {
+    curl -s -m 5 http://127.0.0.1:8080/program_info 2>/dev/null | grep -q .
+}
+
+# ---- 3. exactly one CodeBrowser -------------------------------------------
+# The HTTP server lives in the CodeBrowser tool, not the project window. A
+# second CodeBrowser cannot bind 8080 and closing either one stops the server,
+# so only open one if none exists.
+if server_ok; then
+    log "server already answering - nothing to open"
+else
+    log "opening CodeBrowser"
+    if ! wait_for 60 xdotool search --name "^Ghidra: "; then
+        log "FAILED: ghidra project window never appeared"
+        exit 1
+    fi
+    WID=$(xdotool search --name "^Ghidra: " | tail -1)
+    xdotool windowactivate --sync "$WID" 2>/dev/null || xdotool windowraise "$WID"
+    sleep 2
+
+    # The Tool Chest dragon sits at a fixed offset inside the project window;
+    # derive it from the window origin rather than hardcoding screen coordinates,
+    # because the window does not always open in the same place.
+    eval "$(xdotool getwindowgeometry --shell "$WID")"
+    ICON_X=$((X + 17))
+    ICON_Y=$((Y + 49))
+    log "tool chest icon computed at ${ICON_X},${ICON_Y} (window at ${X},${Y})"
+
+    # Launching the tool pops modal dialogs that block it from finishing:
+    #   "New Plugins Found!"  - twice: a Yes/No question, then a list with OK
+    #   "Tip of the Day"      - on a fresh profile
+    # Waiting for a CodeBrowser window without clearing these waits forever.
+    dismiss_dialogs() {
+        local w
+        w=$(xdotool search --name "New Plugins Found" 2>/dev/null | tail -1)
+        if [ -n "$w" ]; then
+            log "dismissing: New Plugins Found (accepting)"
+            xdotool windowactivate --sync "$w" 2>/dev/null
+            sleep 1
+            xdotool key Return        # default button: Yes, then OK on the list
+            sleep 2
+        fi
+        w=$(xdotool search --name "Tip of the Day" 2>/dev/null | tail -1)
+        if [ -n "$w" ]; then
+            log "dismissing: Tip of the Day"
+            xdotool windowactivate --sync "$w" 2>/dev/null
+            sleep 1
+            xdotool key Escape
+            sleep 1
+        fi
+    }
+
+    # Swing does not always accept the first synthetic double-click, so retry.
+    opened=0
+    for attempt in 1 2 3; do
+        xdotool windowactivate --sync "$WID" 2>/dev/null || xdotool windowraise "$WID"
+        sleep 1
+        xdotool mousemove "$ICON_X" "$ICON_Y" click 1
+        sleep 1
+        xdotool mousemove "$ICON_X" "$ICON_Y" click --repeat 2 --delay 80 1
+
+        for _ in $(seq 1 15); do
+            if xdotool search --name "^CodeBrowser" >/dev/null 2>&1; then
+                opened=1
+                break
+            fi
+            dismiss_dialogs
+            sleep 2
+        done
+        [ "$opened" -eq 1 ] && break
+        log "attempt ${attempt}: CodeBrowser not up yet"
+    done
+
+    if [ "$opened" -ne 1 ]; then
+        # Leave evidence rather than just an exit code - a screenshot shows a
+        # blocking dialog or a mis-clicked coordinate immediately. Stay alive
+        # too: exiting here would end the wsl session and kill Ghidra, taking
+        # the very state that needs inspecting with it.
+        import -window root /mnt/share/ghidra-boot-fail.png 2>/dev/null
+        log "FAILED: CodeBrowser did not open (icon ${ICON_X},${ICON_Y})"
+        log "screenshot written to /mnt/share/ghidra-boot-fail.png"
+        log "leaving Ghidra running so the state can be inspected"
+        while pgrep -f "ghidra.GhidraRun" >/dev/null 2>&1; do sleep 10; done
+        exit 1
+    fi
+fi
+
+# ---- 4. confirm the server really answers ---------------------------------
+if ! wait_for 45 server_ok; then
+    import -window root /mnt/share/ghidra-boot-fail.png 2>/dev/null
+    log "FAILED: port 8080 never opened."
+    log "Most likely the CodeBrowser tool does not have GhidraMCPPlugin enabled."
+    log "Fix once, and it sticks: in CodeBrowser use File > Configure to tick"
+    log "GhidraMCPPlugin, then File > Save Tool. The saved tool keeps the plugin,"
+    log "so every future CodeBrowser starts the server with no dialogs."
+    log "Also check for a second CodeBrowser (two cannot both bind 8080):"
+    log "  grep -i ghidramcp ~/.config/ghidra/ghidra_12.1.3_PUBLIC/application.log | tail"
+    log "leaving Ghidra running so this can be fixed now"
+    while pgrep -f "ghidra.GhidraRun" >/dev/null 2>&1; do sleep 10; done
+    exit 1
+fi
+
+log "READY - GhidraMCP listening on 8080"
+log "blocking to keep the session alive; stop with: pkill -f ghidra.GhidraRun"
+
+# Keep this shell alive for as long as Ghidra lives, so WSL does not reap it.
+while pgrep -f "ghidra.GhidraRun" >/dev/null 2>&1; do
+    sleep 10
+done
+log "ghidra exited"

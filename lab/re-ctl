@@ -1,0 +1,108 @@
+#!/bin/bash
+# re-ctl - a small, quote-safe control surface for driving the lab and its GUI.
+#
+# Exists because commands issued from Windows get mangled on the way in: Git Bash
+# rewrites anything that looks like a Unix path (/mnt, /proc, /tmp) into a Windows
+# path, and nested quoting eats shell variables. Every subcommand here takes plain
+# positional arguments, so nothing needs escaping from the caller's side.
+#
+#   re-ctl shot [name]          screenshot the desktop  -> /mnt/share/<name>.png
+#   re-ctl shotwin <match>      screenshot one window by title substring
+#   re-ctl windows              list windows on the desktop
+#   re-ctl click <x> <y>        move pointer and left-click
+#   re-ctl rclick <x> <y>       right-click
+#   re-ctl dblclick <x> <y>     double-click
+#   re-ctl type <text...>       type a string into the focused window
+#   re-ctl key <keys>           press keys, e.g. Return, ctrl+s, alt+F4
+#   re-ctl focus <match>        raise and focus a window by title substring
+#   re-ctl run <cmd...>         launch a GUI program on the desktop display
+#   re-ctl sh <cmd...>          run a shell command (no GUI)
+#   re-ctl geom <match>         geometry of a window by title substring
+#   re-ctl ps                   what GUI apps are running
+#
+# DISP defaults to the nested desktop (:10). Set DISP=:0 to drive apps that WSLg
+# is showing as their own Windows windows instead.
+set -u
+DISP="${DISP:-:10}"
+SHARE=/mnt/share
+export DISPLAY="$DISP"
+
+# GUI apps must be kept off Wayland or they land on WSLg's compositor instead of
+# the display we are driving. Same reason the nested desktop needs it.
+gui_env() { env -u WAYLAND_DISPLAY DISPLAY="$DISP" GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb "$@"; }
+
+die() { echo "re-ctl: $*" >&2; exit 1; }
+
+find_window() {
+    local id
+    id=$(xdotool search --name "$1" 2>/dev/null | tail -1)
+    [ -n "$id" ] || die "no window matching '$1'"
+    echo "$id"
+}
+
+cmd=${1:-help}; shift 2>/dev/null || true
+
+case "$cmd" in
+  shot)
+      name=${1:-shot}
+      import -window root "$SHARE/$name.png" || die "capture failed"
+      echo "$SHARE/$name.png"
+      ;;
+  shotwin)
+      [ $# -ge 1 ] || die "usage: re-ctl shotwin <title-match> [name]"
+      id=$(find_window "$1")
+      name=${2:-window}
+      import -window "$id" "$SHARE/$name.png" || die "capture failed"
+      echo "$SHARE/$name.png"
+      ;;
+  windows)
+      xdotool search --name "." getwindowname %@ 2>/dev/null | sed '/^$/d'
+      ;;
+  click|rclick|dblclick)
+      [ $# -ge 2 ] || die "usage: re-ctl $cmd <x> <y>"
+      case "$cmd" in
+        click)    xdotool mousemove "$1" "$2" click 1 ;;
+        rclick)   xdotool mousemove "$1" "$2" click 3 ;;
+        dblclick) xdotool mousemove "$1" "$2" click --repeat 2 1 ;;
+      esac
+      echo "$cmd at $1,$2"
+      ;;
+  type)
+      [ $# -ge 1 ] || die "usage: re-ctl type <text...>"
+      xdotool type --delay 25 -- "$*"
+      echo "typed ${#*} chars"
+      ;;
+  key)
+      [ $# -ge 1 ] || die "usage: re-ctl key <keys>"
+      xdotool key -- "$@"
+      echo "pressed $*"
+      ;;
+  focus)
+      [ $# -ge 1 ] || die "usage: re-ctl focus <title-match>"
+      id=$(find_window "$1")
+      xdotool windowactivate --sync "$id" 2>/dev/null || xdotool windowraise "$id"
+      echo "focused $(xdotool getwindowname "$id")"
+      ;;
+  geom)
+      [ $# -ge 1 ] || die "usage: re-ctl geom <title-match>"
+      xdotool getwindowgeometry "$(find_window "$1")"
+      ;;
+  run)
+      [ $# -ge 1 ] || die "usage: re-ctl run <cmd...>"
+      gui_env nohup "$@" >/tmp/re-ctl-run.log 2>&1 &
+      echo "launched: $*"
+      ;;
+  sh)
+      [ $# -ge 1 ] || die "usage: re-ctl sh <cmd...>"
+      "$@"
+      ;;
+  ps)
+      pgrep -a -f "ghidra|radare2|Xephyr|xfce4-session|wine" | cut -c1-100
+      ;;
+  help|--help|-h)
+      sed -n '3,30p' "$0" | sed 's/^# \?//'
+      ;;
+  *)
+      die "unknown command '$cmd' (try: re-ctl help)"
+      ;;
+esac

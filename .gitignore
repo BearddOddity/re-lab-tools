@@ -1,0 +1,17 @@
+# Never commit binaries or challenge samples: repo bloat, GitHub file scanning,
+# and redistribution problems with third-party crackme files.
+*.exe
+*.dll
+*.bin
+*.zip
+*.7z
+*.rar
+*.crate
+*.tar
+*.tar.gz
+
+# Analysis artefacts and scratch output
+*.png
+*.log
+dump*.bin
+opcodes.csv

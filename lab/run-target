@@ -1,0 +1,52 @@
+#!/bin/bash
+# run-target - launch a Windows target under Wine and BLOCK while it runs.
+#
+#   run-target <exe-path> [display]
+#
+# Blocking is the point. A process started by a one-shot `wsl.exe` call is
+# killed when that call returns, so a GUI target launched with nohup/& vanishes
+# seconds later. Launch this from Windows with Start-Process and leave it
+# running:
+#
+#   Start-Process wsl.exe -ArgumentList '-d','kali-linux','--','run-target','/path/app.exe'
+#
+# Keeping the argument handling here also avoids PowerShell re-quoting a long
+# command line, which silently broke `cd` and produced "File not found".
+set -u
+
+TARGET="${1:-}"
+DISP="${2:-:0}"
+
+if [ -z "$TARGET" ] || [ ! -f "$TARGET" ]; then
+    echo "run-target: no such file: ${TARGET:-<none>}" >&2
+    exit 1
+fi
+
+DIR=$(dirname "$TARGET")
+EXE=$(basename "$TARGET")
+
+# Pick the prefix from the PE header, same rule as re-run.
+BITS=$(python3 - "$TARGET" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read(0x400)
+try:
+    off = struct.unpack_from("<I", d, 0x3C)[0]
+    print({0x014c: "32", 0x8664: "64"}.get(struct.unpack_from("<H", d, off + 4)[0], "32"))
+except Exception:
+    print("32")
+PY
+)
+
+if [ "$BITS" = "64" ]; then
+    export WINEARCH=win64 WINEPREFIX="$HOME/.wine64"
+else
+    export WINEARCH=win32 WINEPREFIX="$HOME/.wine32"
+fi
+export DISPLAY="$DISP"
+export WINEDEBUG="${WINEDEBUG:--all}"
+
+echo "run-target: ${BITS}-bit, prefix $WINEPREFIX, display $DISPLAY"
+echo "run-target: cd $DIR && wine $EXE"
+
+cd "$DIR" || exit 1
+exec wine "$EXE"
