@@ -54,7 +54,14 @@ $ErrorActionPreference = 'Stop'
 $AppName = 'Kali RE Lab'
 $RegKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KaliRELab'
 $Distro  = 'kali-linux'
-$Version = '1.1.0'
+# Single source of truth, shipped alongside the scripts. Hardcoding it here as
+# well guarantees the two drift: this printed 1.1.0 from a 1.2.0 package the
+# first time the release was assembled.
+$Version = 'unknown'
+foreach ($vf in @((Join-Path $PSScriptRoot 'VERSION'),
+                  (Join-Path $PSScriptRoot '..\VERSION'))) {
+    if (Test-Path $vf) { $Version = (Get-Content $vf -First 1).Trim(); break }
+}
 
 function Say($m, $c = 'Gray') { Write-Host $m -ForegroundColor $c }
 
@@ -98,12 +105,18 @@ Say "prerequisites  ok ($Distro registered)" 'Green'
 # --- copy payload ------------------------------------------------------------
 $payload = @('launch-desktop.vbs', 'make-shortcuts.ps1', 'snapshot.ps1', 'restore.ps1',
              'relab-common.ps1', 'Uninstall.ps1', 're-lab.ico', 'ghidra.ico')
+# VERSION is copied too, so the installed copy can report itself accurately.
+$optional = @('VERSION')
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 foreach ($f in $payload) {
     $src = Join-Path $PSScriptRoot $f
     if (-not (Test-Path $src)) { throw "Missing from this package: $f" }
     Copy-Item $src (Join-Path $InstallDir $f) -Force
+}
+foreach ($f in $optional) {
+    $src = Join-Path $PSScriptRoot $f
+    if (Test-Path $src) { Copy-Item $src (Join-Path $InstallDir $f) -Force }
 }
 Say "installed      $InstallDir" 'Green'
 
