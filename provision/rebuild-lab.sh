@@ -45,6 +45,44 @@ mkdir -p /mnt/share
 # - it changes PID 1, so a restart of the distro alone will not do it. Until
 # then systemctl reports "offline" and nothing below that touches a unit works.
 
+# ---------------------------------------------------------------- task manager
+# Task Manager TMOG (Plummer's Software) replaces xfce4-taskmanager as the
+# desktop's task manager. It is not in Debian or Kali, so the .deb has to be
+# supplied - drop it in the source directory or /mnt/share and this picks it up.
+#   https://github.com/PlummersSoftwareLLC/TMOG
+TMOG_DEB=$(ls "$SRC_DIR"/TMOG-*.deb /mnt/share/TMOG-*.deb 2>/dev/null | head -1)
+if [ -n "$TMOG_DEB" ]; then
+    say "task manager (TMOG)"
+    # The package under-declares its dependencies: it lists only libc6, libgcc,
+    # libstdc++ and libsystemd, but links against Qt6 Multimedia for its splash
+    # video and will not start without it.
+    apt-get install -y -qq "$TMOG_DEB" libqt6multimedia6 || true
+
+    # Desktop-entry override pointing at the wrapper, in /usr/local/share so a
+    # package upgrade cannot overwrite it. That path outranks /usr/share in
+    # XDG_DATA_DIRS.
+    mkdir -p /usr/local/share/applications
+    if [ -f /usr/share/applications/com.tmog.taskmanager.desktop ]; then
+        sed 's|^Exec=tmog-task-manager|Exec=/usr/local/bin/tmog|'             /usr/share/applications/com.tmog.taskmanager.desktop             > /usr/local/share/applications/com.tmog.taskmanager.desktop
+    fi
+
+    # xfce4-taskmanager cannot be removed - kali-desktop-xfce depends on it, and
+    # removing it takes the desktop metapackage with it. Hide its launcher
+    # instead: the dependency stays satisfied and TMOG is the only task manager
+    # the menu offers.
+    if [ -f /usr/share/applications/xfce4-taskmanager.desktop ]; then
+        { sed 's|^NoDisplay=.*||' /usr/share/applications/xfce4-taskmanager.desktop
+          echo 'NoDisplay=true'; } > /usr/local/share/applications/xfce4-taskmanager.desktop
+    fi
+    update-desktop-database /usr/local/share/applications 2>/dev/null || true
+
+    # Ctrl+Shift+Escape, by absolute path - xfsettingsd spawns with its own PATH
+    # and a bare command name silently does nothing.
+    sudo -u "$USER_NAME" bash -lc         "xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Primary><Shift>Escape' -s '/usr/local/bin/tmog' -n -t string"         2>/dev/null || true
+else
+    say "task manager (TMOG) - no TMOG-*.deb found, skipping"
+fi
+
 # ---------------------------------------------------------------- services
 # Only reachable once systemd is PID 1 (see wsl.conf above). Skipped rather than
 # failed when it is not, so a first pass before `wsl --shutdown` still completes.

@@ -18,6 +18,7 @@ Operating the lab itself.
 | `re-run` | Run a Windows PE under Wine, picking the 32/64-bit prefix from the header |
 | `run-target` | Same but **blocks**, for GUI targets that must stay alive |
 | `re-clipsync` | Shares the clipboard between the nested desktop and Windows |
+| `tmog` | Launches Task Manager TMOG with Wayland stripped and Qt pinned to xcb |
 | `ghidra-mcp-run` | Launch Ghidra in foreground mode |
 | `ghidra-mcp-start` | Cold start of the whole Ghidra MCP stack to a verified server |
 
@@ -212,6 +213,23 @@ explicit `WxH`. Shortcuts for the first two are created by
   `tpm-udev` is masked because WSL passes no TPM through, and that single
   permanently-failing unit is enough to make the whole system report
   `degraded`, which hides real failures behind constant noise.
+- **Task Manager TMOG replaces xfce4-taskmanager.** Plummer's Software's Qt6
+  system monitor, on `Ctrl+Shift+Escape` and in the menu. Not packaged by Debian
+  or Kali, so `provision/rebuild-lab.sh` installs it from a `TMOG-*.deb` left in
+  the source directory or `/mnt/share`, and pulls `libqt6multimedia6` - the
+  package under-declares its dependencies and will not start without it.
+
+  It is launched through the `tmog` wrapper rather than directly. Qt6 prefers
+  Wayland whenever `WAYLAND_DISPLAY` is set, WSLg sets it for every process in
+  the lab, and the result is a window that opens on WSLg's compositor as a
+  *Windows* window - present in neither X server's window tree. The process runs,
+  spins and appears hung. The wrapper strips `WAYLAND_DISPLAY` and pins
+  `QT_QPA_PLATFORM=xcb`.
+
+  `xfce4-taskmanager` stays installed because `kali-desktop-xfce` depends on it;
+  its launcher is hidden with a `NoDisplay=true` override in `/usr/local/share`
+  instead.
+
 - **The clipboard is shared with Windows.** Xephyr's `:10` is a separate X
   server from WSLg's `:0`, and only `:0` is bridged to Windows, so without help
   the desktop's clipboard is an island - text copied inside Linux cannot be

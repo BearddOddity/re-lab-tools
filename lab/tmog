@@ -1,0 +1,21 @@
+#!/bin/bash
+# Launch Task Manager TMOG with a display setup that actually works in the lab.
+#
+# TMOG is Qt6, and Qt prefers Wayland whenever WAYLAND_DISPLAY is set. WSLg sets
+# it for every process in the lab, so an unwrapped launch renders to WSLg's own
+# compositor and opens as a WINDOWS window - invisible to the nested desktop and
+# to WSLg's X server alike. The symptom is a process that starts, spins, and
+# never maps a window anywhere, which reads as a hung application rather than a
+# window that opened somewhere you were not looking. It cost an hour here.
+#
+# Stripping WAYLAND_DISPLAY and pinning the Qt platform to xcb keeps it on
+# whatever X display DISPLAY names, which is what makes it behave like an
+# ordinary application inside the desktop.
+#
+# The keyboard shortcut binds to this script by ABSOLUTE path: xfsettingsd
+# spawns commands with its own environment, and /usr/local/bin is not reliably
+# on that PATH - a bare "tmog" there silently does nothing at all.
+exec env -u WAYLAND_DISPLAY \
+     QT_QPA_PLATFORM=xcb \
+     GDK_BACKEND=x11 \
+     tmog-task-manager "$@"
