@@ -39,6 +39,8 @@ Operating the lab itself.
 | `BuildFidDatabase.java` | Ghidra script — builds a Function ID (`.fidb`) database from a program's named functions |
 | `DumpFunctionHashes.java` | Ghidra script — dumps every function's FID hash, for cross-binary comparison |
 | `WalkMsvcRtti.java` | Ghidra script — walks MSVC RTTI to vtables and names virtual functions |
+| `ExportAnalysis.java` | Ghidra script — exports names, prototypes and labels as diffable text |
+| `ApplyAnalysis.java` | Ghidra script — re-applies an export to a freshly imported program |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -214,6 +216,29 @@ invent them. There is no source of MSVC CRT names in this toolchain - no XDK
 linked CRT/STL functions stay unnamed. FID moves the ~671 known names to other
 XDK 5849 titles, which is worth having and is not the same as solving the
 unnamed-function problem.
+
+### Keep the analysis in git, not the project
+
+A Ghidra project is an opaque binary - 465 MB here across five programs, with
+single files up to 98 MB. It cannot be diffed, reviewed in a pull request, or
+merged when two people work at once, and it is regenerable from the executable
+plus these scripts. What is worth versioning is the analysis, and that is text:
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript ExportAnalysis.java analysis.txt
+# ... later, against a freshly imported binary
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript ApplyAnalysis.java analysis.txt
+```
+
+For X-Men Legends that is 4,560 functions with prototypes and calling
+conventions plus 6,856 labels - **636 KB instead of 465 MB**, and a pull request
+shows exactly which functions gained names.
+
+The export records the program's SHA-256 and the apply side refuses to run
+against a different binary. Names are applied by address, so running an export
+against the wrong build would not fail - it would silently produce a program
+full of confident, wrong labels. Verified by pointing one game's export at
+another game's program and watching it refuse.
 
 ### RTTI is the biggest single source of names
 
