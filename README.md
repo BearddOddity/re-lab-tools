@@ -50,6 +50,10 @@ Operating the lab itself.
 | `DecompileList.java` | Ghidra script — batch-decompiles a given list of addresses |
 | `NameByStringXref.java` | Ghidra script — names functions from the string constants they reference |
 | `ForceRename.java` | Ghidra script — renames unconditionally; the only way to back out a bad name |
+| `OrphanCode.java` | Ghidra script — finds and promotes disassembled code that belongs to no function |
+| `ProbeAddress.java` | Ghidra script — every instruction touching an address range, reads vs writes |
+| `ProbeUndefined.java` | Ghidra script — what surrounds code that has no function |
+| `WhoRefs.java` | Ghidra script — references to an address, and whether each referrer is itself lifted |
 | `function-queue.py` | Works through unnamed game functions in batches, keeping state |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
@@ -291,6 +295,44 @@ Name from evidence and claim no more than that. `FUN_00062f10` copies a string,
 scans for a `%END%` marker and pulls replacements from the resource manager: it
 is `ExpandTextMacros_PercentEnd`. Its callers are `CBlock` virtuals, but `this`
 being a `CBlock` is inference, so no class prefix was claimed.
+
+### Code that belongs to no function is invisible to a recompiler
+
+A recompiler lifts functions. Instructions the analyser never attributed to one
+do not exist as far as it is concerned - and that produces a very confusing
+symptom: a table that nothing appears to write, when the writer is sitting right
+there in the listing.
+
+```bash
+analyzeHeadless ... -postScript OrphanCode.java        # measure
+analyzeHeadless ... -postScript OrphanCode.java apply  # promote the good ones
+```
+
+Measured on X-Men Legends: **143,501 instructions outside every function**,
+across 6,973 contiguous runs. Promoting only the runs that are both referenced
+and open with a recognisable prologue - 609 of them - moved **44,926
+instructions** into lifted code and left 11 such candidates behind.
+
+**Promote conservatively.** Requiring both a reference and a prologue is what
+keeps this from turning misaligned data into fake functions. The measure-only
+mode exists because creating hundreds of functions changes a database materially,
+and after re-lifting it changes generated code.
+
+### Chase the reference, not just the address
+
+When something is never called, ask what refers to it and whether the referrer is
+itself lifted. `WhoRefs.java` prints exactly that, and the answer is often the
+whole diagnosis:
+
+    WR target=00216210 references=1
+    WR  from=003f4478  type=DATA  in=ORPHAN (not lifted)  insn=(data)
+
+A **DATA** reference means the address sits in a table of function pointers and
+is reached indirectly. A lifter following direct calls from an entry point never
+arrives. So "nothing writes this table" turned out to mean "the writer is only
+reachable through a data pointer" - a completely different and far more tractable
+problem. Treating data-referenced function pointers as lift roots is the durable
+fix.
 
 ### A queue for the functions only reading will identify
 
