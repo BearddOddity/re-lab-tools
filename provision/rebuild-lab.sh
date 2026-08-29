@@ -68,7 +68,7 @@ apt-get update -qq
 apt-get install -y -qq \
     xfce4 xfce4-terminal thunar dbus-x11 xserver-xephyr x11-utils xdotool imagemagick \
     ghidra radare2 gdb gdb-multiarch binwalk upx-ucl ltrace strace hexedit yara \
-    python3-pefile python3-capstone python3-lief python3-pip python3-venv patchelf vim-common \
+    python3-pefile python3-capstone python3-lief python3-unicorn python3-pip python3-venv patchelf vim-common \
     wine wine32:i386 wine64 cmake maven git cabextract curl unzip
 
 # ---------------------------------------------------------------- ghidra

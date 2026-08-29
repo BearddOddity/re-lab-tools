@@ -105,6 +105,9 @@ e-lab-tools\skills\* $env:USERPROFILE\.claude\skills\ -Recurse -Force
 
 ## solutions/
 
+`solve_qvm32.py` needs `python3-unicorn` (`apt install python3-unicorn`); the
+others need only the standard library.
+
 Per-target keygens, kept as worked examples.
 
 | Script | Target |
@@ -113,6 +116,7 @@ Per-target keygens, kept as worked examples.
 | `solve_prime.py` | `prime.exe` (crackmes.one) — inverts `pow(129, char, 251)` then XOR |
 | `keygen_bfcrackme40.py` | `BFCrackMe40` (crackmes.one) — VB6 P-code; string-range check |
 | `keygen_keygenme2.py` | `Keygen #2 by Nicohogtag` (crackmes.one) — MinGW C++; STABS symbols, and a check that reads two bytes past its input buffer |
+| `solve_qvm32.py` | `qvm32` (crackmes.one) — Linux ELF bytecode VM; Unicorn emulation with VM-step counting as the oracle |
 
 ## Rebuilding the lab elsewhere
 
@@ -151,7 +155,9 @@ entry, icon, and a line in Apps & features. Per-user, no elevation.
 
 ```powershell
 .\Install.ps1                       # %LOCALAPPDATA%\Programs\RE Lab
-.\Install.ps1 -InstallDir 'D:e-lab' -SnapshotDir 'D:e-lab\snapshots'
+.\Install.ps1 -InstallDir 'D:
+e-lab' -SnapshotDir 'D:
+e-lab\snapshots'
 .\Install.ps1 -LinkDistro           # move the distro inside the app folder
 ```
 
