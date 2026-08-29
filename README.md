@@ -38,6 +38,7 @@ Operating the lab itself.
 | `ApplyXboxSignatures.java` | Ghidra script — gives the named SDK functions their real prototypes |
 | `BuildFidDatabase.java` | Ghidra script — builds a Function ID (`.fidb`) database from a program's named functions |
 | `DumpFunctionHashes.java` | Ghidra script — dumps every function's FID hash, for cross-binary comparison |
+| `WalkMsvcRtti.java` | Ghidra script — walks MSVC RTTI to vtables and names virtual functions |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -213,6 +214,41 @@ invent them. There is no source of MSVC CRT names in this toolchain - no XDK
 linked CRT/STL functions stay unnamed. FID moves the ~671 known names to other
 XDK 5849 titles, which is worth having and is not the same as solving the
 unnamed-function problem.
+
+### RTTI is the biggest single source of names
+
+Ghidra's RTTI analyzer is tied to PE, so on an XBE it never runs - and the
+binaries are full of it. MSVC RTTI has a fixed layout, so walking it by hand is
+straightforward:
+
+    TypeDescriptor            +0x00 vftable, +0x04 spare, +0x08 ".?AVFoo@@"
+    RTTICompleteObjectLocator +0x00 signature(0), +0x0C TypeDescriptor*
+    vtable                    the COL pointer sits at vtable[-1]
+
+Find the name string, step back 8 to the descriptor, find what points at it,
+step back 0x0C to a candidate locator, find what points at THAT, and the next
+dword starts the vtable.
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript WalkMsvcRtti.java
+```
+
+On X-Men Legends: 873 classes, 743 vtables, 55,832 slots walked.
+
+| | before | after |
+|---|---|---|
+| named functions | 714 | **4,475** |
+| total functions | 14,824 | **17,308** |
+
+Six times the names, and 2,484 functions that analysis had never found at all -
+vtable targets that were never recognised as code.
+
+**Index once, not per class.** The first version scanned all of memory to answer
+"what points at this address", once per class and again per locator. With ~900
+classes that is quadratic and produced nothing in two minutes. Building a single
+map of every 4-byte-aligned dword whose value lands inside the image makes each
+lookup constant time and the whole walk finish in about a minute - and the index
+is small (51k entries here) because non-pointer values are skipped.
 
 ### Separating engine code from game code
 
