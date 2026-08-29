@@ -109,7 +109,8 @@ if ($KeepFiles) {
     # Delete only what Install.ps1 placed here, so a snapshots/ subdirectory or
     # anything else the user put in this folder survives a plain uninstall.
     $ours = @('launch-desktop.vbs', 'make-shortcuts.ps1', 'snapshot.ps1', 'restore.ps1',
-              'relab-common.ps1', 're-lab.ico', 'ghidra.ico', 'relab.config.ps1')
+              'relab-common.ps1', 're-lab.ico', 'ghidra.ico', 'relab.config.ps1',
+              'VERSION')
     foreach ($f in $ours) {
         $p = Join-Path $here $f
         if (Test-Path $p) { Remove-Item $p -Force }
