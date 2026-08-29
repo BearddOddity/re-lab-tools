@@ -45,6 +45,29 @@ mkdir -p /mnt/share
 # - it changes PID 1, so a restart of the distro alone will not do it. Until
 # then systemctl reports "offline" and nothing below that touches a unit works.
 
+# ---------------------------------------------------------------- github cli
+# gh is not in Debian or Kali, so it comes from GitHub's own repository. Needed
+# for the lab to be a place work actually lives rather than a scratch machine:
+# cloning, pushing and opening PRs without crossing back to Windows.
+say "github cli"
+install -d -m 0755 /etc/apt/keyrings
+if curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; then
+    chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"         > /etc/apt/sources.list.d/github-cli.list
+    apt-get update -qq && apt-get install -y -qq gh || true
+fi
+
+# Git identity, so commits made in here are attributed rather than anonymous.
+# Authentication is deliberately NOT scripted - run `gh auth login` yourself.
+sudo -u "$USER_NAME" bash -lc '
+    git config --global user.name  "BearddOddity"
+    git config --global user.email "saintlyendless@gmail.com"
+    git config --global init.defaultBranch main
+    git config --global core.autocrlf input
+    git config --global credential.helper store
+    git-lfs install --skip-repo >/dev/null 2>&1 || true
+' || true
+
 # ---------------------------------------------------------------- task manager
 # Task Manager TMOG (Plummer's Software) replaces xfce4-taskmanager as the
 # desktop's task manager. It is not in Debian or Kali, so the .deb has to be
@@ -106,7 +129,7 @@ apt-get update -qq
 apt-get install -y -qq \
     xfce4 xfce4-terminal thunar dbus-x11 xserver-xephyr x11-utils xdotool imagemagick \
     ghidra radare2 gdb gdb-multiarch binwalk upx-ucl ltrace strace hexedit yara \
-    python3-pefile python3-capstone python3-lief python3-unicorn python3-pip python3-venv patchelf vim-common \
+    python3-pefile python3-capstone python3-lief python3-unicorn python3-pip python3-venv patchelf vim-common \n    git-lfs ninja-build pkg-config ccache clang lld gdb mingw-w64 \n    libsdl2-dev libssl-dev libepoxy-dev libgl1-mesa-dev libasound2-dev \
     wine wine32:i386 wine64 cmake maven git cabextract curl unzip
 
 # ---------------------------------------------------------------- ghidra

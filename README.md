@@ -119,6 +119,32 @@ Per-target keygens, kept as worked examples.
 | `keygen_keygenme2.py` | `Keygen #2 by Nicohogtag` (crackmes.one) — MinGW C++; STABS symbols, and a check that reads two bytes past its input buffer |
 | `solve_qvm32.py` | `qvm32` (crackmes.one) — Linux ELF bytecode VM; Unicorn emulation with VM-step counting as the oracle |
 
+## Development in the lab
+
+The lab is not only for reversing - it builds and runs native Linux software,
+and cross-builds Windows binaries that Wine then runs in place.
+
+| Purpose | What is installed |
+|---|---|
+| Build | `cmake`, `ninja`, `make`, `gcc`/`g++`, `clang`, `lld`, `ccache`, `pkg-config` |
+| Cross-build to Windows | `mingw-w64` — produces PE32+ binaries, runnable via `re-run` |
+| Libraries | SDL2, OpenSSL, epoxy, GL, ALSA (dev headers) |
+| Debug | `gdb`, plus the RE tooling above |
+| Source control | `git`, `git-lfs`, `gh` (from GitHub's own apt repo) |
+
+Verified end to end: a CMake + Ninja project linking SDL2, OpenSSL and epoxy
+compiles and runs, and `x86_64-w64-mingw32-gcc` produces a Windows PE32+ that
+`re-run` executes under Wine. That closes the loop — write, build and test both
+targets without leaving the lab.
+
+**GitHub authentication is not scripted.** Run `gh auth login` in the lab
+yourself; provisioning sets the git identity but never handles credentials.
+
+GPU acceleration is real inside the desktop — `D3D12 (AMD Radeon RX 7600 XT)`,
+OpenGL 4.6, direct rendering. **Vulkan is software only**: the `dzn` ICD that
+maps Vulkan onto D3D12 is not installed, so only `lavapipe` is available. Work
+that needs a real Vulkan device will not perform here.
+
 ## Rebuilding the lab elsewhere
 
 The lab snapshot is ~13 GB — far past GitHub's 100 MB per-file limit — so this
