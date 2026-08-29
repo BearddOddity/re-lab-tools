@@ -14,6 +14,7 @@ $shortcuts = @(
     # ones it generates - Windows cleans that up and the shortcut goes blank.
     @{ Name = 'Kali RE Lab';       Target = "$sys\wscript.exe"; Args = "`"$PSScriptRoot\launch-desktop.vbs`""; Icon = "$PSScriptRoot\re-lab.ico"; Desc = 'Kali desktop (XFCE) in a window' }
     @{ Name = 'Kali RE Lab (Fullscreen)'; Target = "$sys\wscript.exe"; Args = "`"$PSScriptRoot\launch-desktop.vbs`" fullscreen"; Icon = "$PSScriptRoot\re-lab.ico"; Desc = 'Kali desktop filling the monitor' }
+    @{ Name = 'Kali RE Lab (Portrait)';   Target = "$sys\wscript.exe"; Args = "`"$PSScriptRoot\launch-desktop.vbs`" portrait";   Icon = "$PSScriptRoot\re-lab.ico"; Desc = 'Kali desktop at 1080x1920 for a rotated monitor' }
     @{ Name = 'Ghidra (RE Lab)';   Target = 'C:\Program Files\WSL\wslg.exe'; Args = '-d kali-linux --cd "~" -- /opt/ghidra_12.1.3_PUBLIC/ghidraRun'; Icon = "$PSScriptRoot\ghidra.ico"; Desc = 'Ghidra 12.1.3 with the GhidraMCP extension' }
     @{ Name = 'RE Lab - Terminal'; Target = 'wt.exe';            Args = 'wsl.exe -d kali-linux';                     Icon = "$sys\wsl.exe,0";        Desc = 'Kali shell in Windows Terminal' }
     @{ Name = 'RE Lab - Snapshot'; Target = "$sys\WindowsPowerShell\v1.0\powershell.exe"; Args = "-NoExit -ExecutionPolicy Bypass -File `"$PSScriptRoot\snapshot.ps1`""; Icon = "$sys\imageres.dll,76"; Desc = 'Save a rollback point for the lab' }

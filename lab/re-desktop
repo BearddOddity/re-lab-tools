@@ -8,12 +8,27 @@
 set -u
 
 DISP=":10"
-# "fullscreen" gives a real desktop filling the monitor; otherwise WxH.
+# Size presets, or an explicit WxH.
+#   fullscreen  fill the monitor Xephyr lands on
+#   portrait    1080x1920, for a rotated monitor
+#   wide        1920x1080
 SIZE="${1:-1920x1080}"
+case "$SIZE" in
+    portrait)   SIZE=1080x1920 ;;
+    wide)       SIZE=1920x1080 ;;
+    tall)       SIZE=1200x1920 ;;
+esac
 XEPHYR_MODE=(-screen "$SIZE")
 if [ "$SIZE" = "fullscreen" ] || [ "$SIZE" = "-fullscreen" ]; then
     XEPHYR_MODE=(-fullscreen)
 fi
+
+# Dark everywhere, not just in GTK3 apps that happen to ask for it. Qt programs
+# ignore the XFCE theme entirely and come up light unless told otherwise, which
+# looks broken next to a dark panel.
+export GTK_THEME="${GTK_THEME:-Kali-Dark}"
+export QT_STYLE_OVERRIDE="${QT_STYLE_OVERRIDE:-Adwaita-Dark}"
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-gtk2}"
 
 # Mesa defaults to llvmpipe (software rendering) in WSL even though /dev/dxg
 # and the d3d12 Gallium driver are both present, which is why WSLg labels the
