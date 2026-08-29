@@ -196,6 +196,127 @@ def lab_focus(match: str, display: str = DEFAULT_DISPLAY) -> str:
                display=display) or f"focused {match}"
 
 
+# ---------------------------------------------------------------- RE tools
+
+@mcp.tool()
+def lab_strings(path: str, min_len: int = 6, encoding: str = "ascii",
+                filter: str = "", limit: int = 200) -> str:
+    """
+    Strings from a file on disk.
+
+    Args:
+        path: file to scan
+        min_len: minimum run length
+        encoding: "ascii", "utf16" (Windows binaries keep most text as UTF-16),
+                  or "both"
+        filter: only lines containing this (case-insensitive)
+        limit: maximum lines returned
+    """
+    parts = []
+    if encoding in ("ascii", "both"):
+        parts.append(f"strings -n {min_len} '{path}'")
+    if encoding in ("utf16", "both"):
+        parts.append(f"strings -el -n {min_len} '{path}'")
+    cmd = "{ " + "; ".join(parts) + "; }"
+    if filter:
+        cmd += f" | grep -i -- '{filter}'"
+    cmd += f" | head -{limit}"
+    return run(["bash", "-lc", cmd], timeout=180)
+
+
+@mcp.tool()
+def lab_r2(path: str, commands: str, analyse: bool = True) -> str:
+    """
+    Run radare2 in batch mode against a file and return its output.
+
+    Args:
+        path: binary to open
+        commands: r2 commands separated by ';' e.g. "afl" (list functions),
+                  "pdf @ main" (disassemble), "iz" (strings), "ii" (imports)
+        analyse: run 'aaa' first so functions exist (slower on big binaries)
+    """
+    script = ("aaa;" if analyse else "") + commands
+    return run(["bash", "-lc", f"r2 -q -c \"{script}\" '{path}' 2>&1 | head -300"],
+               timeout=600)
+
+
+@mcp.tool()
+def lab_pcode_dis(path: str, proc_va: str, imagebase: str = "0x400000",
+                  constpool: str = "0") -> str:
+    """
+    Disassemble VB6 P-code for one procedure of a fixed-up dump.
+
+    `proc_va` is the address from an ObjectInfo method array - it points at the
+    ProcDscInfo, and the P-code stream sits immediately BEFORE it. The tool
+    handles that; decoding forward from the descriptor reads cleanup tables and
+    filler instead.
+
+    Needs the opcode table at /home/oddity/targets/opcodes.csv - see
+    lab_fetch_pcode_table().
+    """
+    return run(["python3", "/usr/local/bin/pcode-dis.py", path, proc_va,
+                imagebase, constpool], timeout=180)
+
+
+@mcp.tool()
+def lab_fetch_pcode_table() -> str:
+    """
+    Fetch the VB6 P-code opcode table (1536 entries with verified instruction
+    sizes and operand formats) that lab_pcode_dis needs.
+
+    Source: the `visualbasic` crate. Original P-code research by MrUnleaded,
+    Moogman and Napalm.
+    """
+    cmd = (
+        "set -e; mkdir -p /home/oddity/targets; "
+        "if [ -s /home/oddity/targets/opcodes.csv ]; then "
+        "  echo 'already present'; exit 0; fi; "
+        "curl -sL -o /tmp/vb.crate "
+        "https://static.crates.io/crates/visualbasic/visualbasic-0.1.0.crate; "
+        "tar xzf /tmp/vb.crate -C /tmp; "
+        "cp /tmp/visualbasic-0.1.0/data/opcodes.csv /home/oddity/targets/opcodes.csv; "
+        "wc -l /home/oddity/targets/opcodes.csv"
+    )
+    return run(["bash", "-lc", cmd], timeout=300)
+
+
+@mcp.tool()
+def lab_wine_run(path: str, args: str = "", stdin_text: str = "",
+                 timeout: int = 120) -> str:
+    """
+    Run a console Windows PE under Wine and capture its output. The 32- or
+    64-bit prefix is chosen from the PE header.
+
+    For GUI targets use lab_run_target instead - this waits for the program to
+    exit, which a GUI app will not do.
+
+    Args:
+        path: the .exe
+        args: command line arguments
+        stdin_text: text piped to the program's stdin
+    """
+    import shlex
+    inp = f"printf '%s' {shlex.quote(stdin_text)} | " if stdin_text else ""
+    return run(["bash", "-lc",
+                f"{inp}timeout {timeout} re-run '{path}' {args} 2>&1 | tail -40"],
+               timeout=timeout + 60)
+
+
+@mcp.tool()
+def lab_python(code: str, timeout: int = 120) -> str:
+    """
+    Run a Python snippet inside the lab and return its output.
+
+    For keygens and one-off analysis: pefile, capstone, lief and the standard
+    library are available. Writing the algorithm here and checking it against
+    the binary is the way to confirm a keygen rather than assume it.
+    """
+    import base64
+    blob = base64.b64encode(code.encode()).decode()
+    return run(["bash", "-lc",
+                f"echo {blob} | base64 -d | python3 -"], timeout=timeout)
+
+
 # ---------------------------------------------------------------- memory
 
 @mcp.tool()

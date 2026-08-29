@@ -60,6 +60,27 @@ claude mcp add re-lab --scope user -- wsl.exe -d kali-linux -- /opt/re-lab-mcp/v
 
 Needs `mcp<2` in a venv at `/opt/re-lab-mcp/venv` — `FastMCP` was renamed in 2.x.
 
+24 tools in five groups:
+
+| Group | Tools |
+|---|---|
+| Shell | `lab_exec`, `lab_exec_root`, `lab_kill` |
+| RE toolchain | `lab_triage`, `lab_strings`, `lab_r2`, `lab_disas`, `lab_hexdump`, `lab_wine_run`, `lab_python` |
+| VB6 | `lab_vbinfo`, `lab_pcode_dis`, `lab_fetch_pcode_table` |
+| Live process | `lab_run_target`, `lab_mem_strings`, `lab_dump_memory`, `lab_fix_dump` |
+| GUI | `lab_windows`, `lab_window_tree`, `lab_screenshot`, `lab_click`, `lab_type`, `lab_key`, `lab_focus` |
+
+Ghidra is a separate MCP (`ghidra`, 37 tools) because it talks to a plugin
+inside a running Ghidra rather than to a shell. The two are meant to be used
+together — `lab_triage` and `lab_r2` to find out what the file is, Ghidra once
+that is known.
+
+**Run `install.sh` before using the MCP.** `lab_vbinfo`, `lab_disas`,
+`lab_fix_dump` and `lab_pcode_dis` shell out to `/usr/local/bin/*.py`. In a lab
+where those scripts were only ever copied into a working directory, every one of
+those tools answers "No such file or directory" — which reads as a broken MCP
+rather than a missing install.
+
 ## solutions/
 
 Per-target keygens, kept as worked examples.
