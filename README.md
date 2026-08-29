@@ -41,6 +41,7 @@ Operating the lab itself.
 | `WalkMsvcRtti.java` | Ghidra script — walks MSVC RTTI to vtables and names virtual functions |
 | `ExportAnalysis.java` | Ghidra script — exports names, prototypes and labels as diffable text |
 | `ApplyAnalysis.java` | Ghidra script — re-applies an export to a freshly imported program |
+| `NameVtableStorers.java` | Ghidra script — names constructors/destructors by the vtable pointer they store |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
 ### pcode-dis.py needs the opcode table
@@ -216,6 +217,28 @@ invent them. There is no source of MSVC CRT names in this toolchain - no XDK
 linked CRT/STL functions stay unnamed. FID moves the ~671 known names to other
 XDK 5849 titles, which is worth having and is not the same as solving the
 unnamed-function problem.
+
+### Reaching non-virtual functions
+
+RTTI names virtual functions and nothing else, so once the vtables are walked
+the naming stalls. Constructors and destructors are the way back in: MSVC writes
+the class vtable pointer into the object, `mov [ecx], offset SomeClass::vftable`,
+and those functions are not virtual.
+
+```bash
+analyzeHeadless <projects> <Project> -process <program> -noanalysis     -scriptPath ~/ghidra_scripts -postScript NameVtableStorers.java
+```
+
+634 functions in X-Men Legends, 1,153 in Legends II.
+
+**Named `ctor_or_dtor`, not `ctor`.** MSVC frequently shares code between
+constructor and destructor, and a function storing a vtable may be a factory, so
+naming it a constructor would be a guess presented as a fact.
+
+**When a function stores several vtables, the last one wins.** A derived
+constructor usually has its base constructors inlined, so base vtables are
+stored first and the class's own last - the store at the highest instruction
+address names the function. 92 of the 634 stored more than one.
 
 ### Keep the analysis in git, not the project
 
