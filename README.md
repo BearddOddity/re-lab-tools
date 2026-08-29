@@ -250,6 +250,60 @@ map of every 4-byte-aligned dword whose value lands inside the image makes each
 lookup constant time and the whole walk finish in about a minute - and the index
 is small (51k entries here) because non-pointer values are skipped.
 
+### The same game on two platforms pins the platform layer
+
+The cleanest split does not come from more titles - it comes from ONE title
+built for two platforms. Everything in the Xbox build but not the PC build of
+the same game is, by construction, Xbox platform code.
+
+Marvel: Ultimate Alliance, Xbox against the 2006 PC build (both x86):
+
+| | |
+|---|---|
+| portable (engine + game logic) | 3,973 |
+| **Xbox-only (XDK / Xbox CRT / D3D8)** | **14,244** |
+
+Applied to X-Men Legends, 15,742 functions:
+
+| bucket | | |
+|---|---|---|
+| **Xbox platform (XDK/CRT)** | **7,815** | 49% |
+| **game - unique to this title** | **5,557** | 35% |
+| engine (cross-game, cross-platform) | 1,496 | 9% |
+| X-Men portable code | 730 | 4% |
+| X-Men series only | 144 | <1% |
+
+For a recompilation to Windows, those 7,815 are the functions to REPLACE with
+real Win32/CRT rather than recompile.
+
+**Get the right build.** The 2016 re-releases of Marvel: Ultimate Alliance are
+x64 and cannot take part in byte-level comparison at all. The 2006 retail build
+is x86 and works - but its retail executable is SafeDisc-wrapped, so entropy and
+string count are the check before trusting it (6.44 and 14,575 here, versus 7.5+
+for anything still packed).
+
+### Cross-binary name transfer has a hard ceiling
+
+Transferring names between binaries named by the SAME technique yields almost
+nothing, and it is worth knowing why before spending effort on it.
+
+From two Marvel: Ultimate Alliance builds carrying 8,533 and 6,384 RTTI-derived
+names, X-Men Legends gained **4**. The reason is not ambiguity. Of 10,433
+unnamed hash groups in X-Men Legends:
+
+| | |
+|---|---|
+| no counterpart in either donor | 4,146 |
+| **counterpart exists but is also unnamed** | **6,277** |
+| named donor but ambiguous | 9 |
+| usable | 1 |
+
+Both sides were named by walking RTTI vtables, so both are blind in the same
+place: non-virtual functions, which RTTI cannot reach. Breaking through needs a
+DIFFERENT naming source - diagnostic string references, call-graph propagation
+from named callers, or the engine's own type-registration table - not another
+binary named the same way.
+
 ### Three-way split: engine, platform, and game
 
 With a third title on the same SDK and a build of one title for another
