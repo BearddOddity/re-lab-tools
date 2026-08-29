@@ -1,0 +1,4 @@
+# Everything here runs in Linux. Check out with LF regardless of platform:
+# a CRLF in a shebang makes the kernel report "not found" for a script that is
+# plainly present, which is a confusing way to lose an afternoon.
+* text=auto eol=lf
