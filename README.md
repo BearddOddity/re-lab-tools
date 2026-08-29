@@ -70,6 +70,36 @@ Per-target keygens, kept as worked examples.
 | `solve_prime.py` | `prime.exe` (crackmes.one) — inverts `pow(129, char, 251)` then XOR |
 | `keygen_bfcrackme40.py` | `BFCrackMe40` (crackmes.one) — VB6 P-code; string-range check |
 
+## Rebuilding the lab elsewhere
+
+The lab snapshot is ~13 GB — far past GitHub's 100 MB per-file limit — so this
+repo stores what is needed to **recreate** it rather than an image of it. That
+is also the only form that works on a different machine.
+
+```bash
+wsl --install kali-linux --no-launch
+# put this repo where the lab can see it, then:
+wsl -d kali-linux -u root -- bash /mnt/share/provision/rebuild-lab.sh
+```
+
+`provision/rebuild-lab.sh` recreates the user and sudo rule, the isolation
+config, the package set, Ghidra, our GhidraMCP fork (built from upstream plus
+`ghidra-mcp/ghidramcp-relab.patch`), both MCP bridges, the tooling, and the
+Wine prefixes. It prints the few steps that cannot be automated — the
+`wsl --shutdown`, MCP registration, and the one-time Ghidra tool save.
+
+| File | Purpose |
+|---|---|
+| `provision/wsl.conf` | No automount, no Windows PATH, one shared folder |
+| `provision/fstab` | Mounts that single share at `/mnt/share` |
+| `provision/packages-manual.txt` | Explicitly-installed packages (`apt-mark showmanual`) |
+| `ghidra-mcp/ghidramcp-relab.patch` | Our 10 added MCP tools, against upstream `27f316f` |
+| `ghidra-mcp/bridge-relab.patch` | Bridge wrappers + raised HTTP timeouts |
+
+**For a same-machine restore the snapshot is still the fast path** —
+`D:\re-lab\restore.ps1` takes minutes rather than a full rebuild. Use this
+script when the snapshot is gone, or on a new machine.
+
 ## Things that will bite
 
 - **Processes started from Windows die immediately.** A process launched by a

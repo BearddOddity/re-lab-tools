@@ -1,0 +1,143 @@
+--- /tmp/gmcp/GhidraMCP-release-1-4/bridge_mcp_ghidra.py	2025-06-22 22:48:54.000000000 -0500
++++ /opt/ghidra-mcp/bridge_mcp_ghidra.py	2026-08-28 13:54:16.876271894 -0500
+@@ -33,7 +33,7 @@
+     url = urljoin(ghidra_server_url, endpoint)
+ 
+     try:
+-        response = requests.get(url, params=params, timeout=5)
++        response = requests.get(url, params=params, timeout=30)
+         response.encoding = 'utf-8'
+         if response.ok:
+             return response.text.splitlines()
+@@ -46,9 +46,9 @@
+     try:
+         url = urljoin(ghidra_server_url, endpoint)
+         if isinstance(data, dict):
+-            response = requests.post(url, data=data, timeout=5)
++            response = requests.post(url, data=data, timeout=600)
+         else:
+-            response = requests.post(url, data=data.encode("utf-8"), timeout=5)
++            response = requests.post(url, data=data.encode("utf-8"), timeout=600)
+         response.encoding = 'utf-8'
+         if response.ok:
+             return response.text.strip()
+@@ -333,6 +333,119 @@
+     else:
+         mcp.run()
+         
++
++# ---- ghidramcp-relab additions (stage 1) ----
++
++@mcp.tool()
++def get_program_info() -> list:
++    """
++    Architecture, image base, entry points, compiler and hashes of the loaded program.
++    Call this first when starting on an unfamiliar binary.
++    """
++    return safe_get("program_info")
++
++@mcp.tool()
++def read_bytes(address: str, length: int = 64) -> list:
++    """
++    Hex dump raw bytes at an address (max 4096).
++
++    Args:
++        address: address such as "0x401000"
++        length: number of bytes to read
++    """
++    return safe_get("read_bytes", {"address": address, "length": length})
++
++@mcp.tool()
++def search_bytes(pattern: str, limit: int = 50) -> list:
++    """
++    Search program memory for a byte pattern, returning addresses and the
++    containing function where known.
++
++    "??" is a wildcard byte, so "48??8b" matches 48 xx 8b - useful for
++    signatures that must tolerate a varying register or relocated operand.
++
++    Args:
++        pattern: hex string, optionally with ?? wildcards
++        limit: maximum number of hits
++    """
++    return safe_get("search_bytes", {"pattern": pattern, "limit": limit})
++
++@mcp.tool()
++def get_callers(name: str) -> list:
++    """
++    Functions that call the given function. Accepts a function name or any
++    address inside it.
++    """
++    return safe_get("callers", {"name": name})
++
++@mcp.tool()
++def get_callees(name: str) -> list:
++    """
++    Functions called by the given function. Accepts a function name or any
++    address inside it.
++    """
++    return safe_get("callees", {"name": name})
++
++
++
++# ---- ghidramcp-relab additions (stage 2) ----
++
++@mcp.tool()
++def import_binary(path: str, analyze: bool = True) -> list:
++    """
++    Load a binary from disk into the open Ghidra project and open it for
++    analysis. This is the starting point for a new target.
++
++    The path is resolved on the Ghidra host (Linux), not on Windows. Files
++    coming from Windows should be placed in the shared folder, which appears
++    inside the lab as /mnt/share.
++
++    Args:
++        path: e.g. "/mnt/share/crackme01.exe"
++        analyze: run auto-analysis after loading (default True)
++    """
++    return safe_post("import_binary", {"path": path, "analyze": str(analyze).lower()})
++
++@mcp.tool()
++def analyze_program() -> str:
++    """Run Ghidra auto-analysis over the currently loaded program."""
++    return safe_post("analyze_program", {})
++
++@mcp.tool()
++def save_program() -> str:
++    """Commit changes (renames, comments, patches) to the Ghidra project."""
++    return safe_post("save_program", {})
++
++@mcp.tool()
++def patch_bytes(address: str, bytes_hex: str) -> str:
++    """
++    Overwrite bytes in program memory, returning the previous bytes so the
++    patch can be reversed.
++
++    This edits the analysis database, not the file on disk - call
++    export_program afterwards to write out a patched binary.
++
++    Args:
++        address: e.g. "0x401234"
++        bytes_hex: e.g. "9090" or "90 90 90"
++    """
++    return safe_post("patch_bytes", {"address": address, "bytes": bytes_hex})
++
++@mcp.tool()
++def export_program(path: str, format: str = "binary") -> str:
++    """
++    Write the program out to a file.
++
++    format="binary" writes raw memory bytes and therefore includes any
++    patches; format="original" writes the file as it was originally imported.
++
++    Args:
++        path: destination on the Ghidra host, e.g. "/mnt/share/patched.exe"
++        format: "binary" or "original"
++    """
++    return safe_post("export_program", {"path": path, "format": format})
++
++
+ if __name__ == "__main__":
+     main()
+ 

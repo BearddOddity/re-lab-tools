@@ -1,0 +1,468 @@
+diff --git a/src/main/java/com/lauriewired/GhidraMCPPlugin.java b/src/main/java/com/lauriewired/GhidraMCPPlugin.java
+index 88583ba..c9fb040 100644
+--- a/src/main/java/com/lauriewired/GhidraMCPPlugin.java
++++ b/src/main/java/com/lauriewired/GhidraMCPPlugin.java
+@@ -1,8 +1,19 @@
+ package com.lauriewired;
+ 
++import java.util.concurrent.atomic.AtomicReference;
++import java.io.File;
++import ghidra.framework.model.Project;
++import ghidra.app.util.importer.AutoImporter;
++import ghidra.app.util.importer.MessageLog;
++import ghidra.app.util.opinion.LoadResults;
++import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
++import ghidra.app.util.exporter.Exporter;
++import ghidra.app.util.exporter.BinaryExporter;
++import ghidra.app.util.exporter.OriginalFileExporter;
+ import ghidra.framework.plugintool.Plugin;
+ import ghidra.framework.plugintool.PluginTool;
+ import ghidra.program.model.address.Address;
++import ghidra.program.model.address.AddressIterator;
+ import ghidra.program.model.address.GlobalNamespace;
+ import ghidra.program.model.listing.*;
+ import ghidra.program.model.mem.MemoryBlock;
+@@ -31,6 +42,7 @@ import ghidra.util.exception.InvalidInputException;
+ import ghidra.framework.plugintool.PluginInfo;
+ import ghidra.framework.plugintool.util.PluginStatus;
+ import ghidra.program.util.ProgramLocation;
++import ghidra.program.util.GhidraProgramUtilities;
+ import ghidra.util.Msg;
+ import ghidra.util.task.ConsoleTaskMonitor;
+ import ghidra.util.task.TaskMonitor;
+@@ -341,6 +353,61 @@ public class GhidraMCPPlugin extends Plugin {
+             sendResponse(exchange, listDefinedStrings(offset, limit, filter));
+         });
+ 
++
++        // ---- ghidramcp-relab additions (stage 1) ----
++        server.createContext("/program_info", exchange -> {
++            sendResponse(exchange, getProgramInfo());
++        });
++
++        server.createContext("/read_bytes", exchange -> {
++            Map<String, String> qparams = parseQueryParams(exchange);
++            sendResponse(exchange, readBytes(qparams.get("address"),
++                    parseIntOrDefault(qparams.get("length"), 64)));
++        });
++
++        server.createContext("/search_bytes", exchange -> {
++            Map<String, String> qparams = parseQueryParams(exchange);
++            sendResponse(exchange, searchBytes(qparams.get("pattern"),
++                    parseIntOrDefault(qparams.get("limit"), 50)));
++        });
++
++        server.createContext("/callers", exchange -> {
++            Map<String, String> qparams = parseQueryParams(exchange);
++            sendResponse(exchange, listCallers(qparams.get("name")));
++        });
++
++        server.createContext("/callees", exchange -> {
++            Map<String, String> qparams = parseQueryParams(exchange);
++            sendResponse(exchange, listCallees(qparams.get("name")));
++        });
++
++
++        // ---- ghidramcp-relab additions (stage 2) ----
++        server.createContext("/import_binary", exchange -> {
++            Map<String, String> params = parsePostParams(exchange);
++            String analyze = params.get("analyze");
++            sendResponse(exchange, importBinary(params.get("path"),
++                    !"false".equalsIgnoreCase(analyze)));
++        });
++
++        server.createContext("/analyze_program", exchange -> {
++            sendResponse(exchange, analyzeCurrentProgram());
++        });
++
++        server.createContext("/save_program", exchange -> {
++            sendResponse(exchange, saveCurrentProgram());
++        });
++
++        server.createContext("/patch_bytes", exchange -> {
++            Map<String, String> params = parsePostParams(exchange);
++            sendResponse(exchange, patchBytes(params.get("address"), params.get("bytes")));
++        });
++
++        server.createContext("/export_program", exchange -> {
++            Map<String, String> params = parsePostParams(exchange);
++            sendResponse(exchange, exportProgram(params.get("path"), params.get("format")));
++        });
++
+         server.setExecutor(null);
+         new Thread(() -> {
+             try {
+@@ -1648,4 +1715,352 @@ public class GhidraMCPPlugin extends Plugin {
+         }
+         super.dispose();
+     }
++
++    // ---- ghidramcp-relab additions (stage 1) ----
++
++    /** Architecture, layout and identity of the loaded program. */
++    private String getProgramInfo() {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        StringBuilder sb = new StringBuilder();
++        sb.append("name: ").append(program.getName()).append("\n");
++        sb.append("executable_path: ").append(program.getExecutablePath()).append("\n");
++        sb.append("format: ").append(program.getExecutableFormat()).append("\n");
++        sb.append("language: ").append(program.getLanguage().getLanguageID()).append("\n");
++        sb.append("compiler_spec: ").append(program.getCompilerSpec().getCompilerSpecID()).append("\n");
++        sb.append("pointer_size_bits: ")
++          .append(program.getAddressFactory().getDefaultAddressSpace().getSize()).append("\n");
++        sb.append("image_base: ").append(program.getImageBase()).append("\n");
++        sb.append("min_address: ").append(program.getMinAddress()).append("\n");
++        sb.append("max_address: ").append(program.getMaxAddress()).append("\n");
++        sb.append("function_count: ").append(program.getFunctionManager().getFunctionCount()).append("\n");
++        sb.append("md5: ").append(program.getExecutableMD5()).append("\n");
++        sb.append("sha256: ").append(program.getExecutableSHA256()).append("\n");
++        StringBuilder eps = new StringBuilder();
++        AddressIterator it = program.getSymbolTable().getExternalEntryPointIterator();
++        int shown = 0;
++        while (it.hasNext() && shown < 10) {
++            eps.append(it.next()).append(" ");
++            shown++;
++        }
++        sb.append("entry_points: ").append(eps.toString().trim()).append("\n");
++        return sb.toString();
++    }
++
++    private String toHexString(byte[] data) {
++        StringBuilder sb = new StringBuilder();
++        for (byte b : data) sb.append(String.format("%02x", b & 0xFF));
++        return sb.toString();
++    }
++
++    /** Classic hex dump: address, 16 bytes, ASCII gutter. */
++    private String readBytes(String addressStr, int length) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        if (addressStr == null || addressStr.isEmpty()) return "address is required";
++        if (length <= 0 || length > 4096) return "length must be between 1 and 4096";
++        try {
++            Address addr = program.getAddressFactory().getAddress(addressStr);
++            if (addr == null) return "Invalid address: " + addressStr;
++            byte[] buf = new byte[length];
++            int got = program.getMemory().getBytes(addr, buf);
++            if (got <= 0) return "No readable bytes at " + addressStr;
++            StringBuilder sb = new StringBuilder();
++            for (int i = 0; i < got; i += 16) {
++                StringBuilder hex = new StringBuilder();
++                StringBuilder ascii = new StringBuilder();
++                for (int j = 0; j < 16 && i + j < got; j++) {
++                    int b = buf[i + j] & 0xFF;
++                    hex.append(String.format("%02x ", b));
++                    ascii.append(b >= 0x20 && b < 0x7F ? (char) b : '.');
++                }
++                sb.append(String.format("%s  %-48s %s%n", addr.add(i), hex.toString(), ascii.toString()));
++            }
++            return sb.toString();
++        } catch (Exception e) {
++            return "Error reading bytes: " + e.getMessage();
++        }
++    }
++
++    /**
++     * Byte-pattern search. "??" or ".." marks a wildcard nibble pair, so
++     * "48??8b" matches 48 xx 8b - the usual way to write a signature that
++     * tolerates a varying register or relocated operand.
++     */
++    private String searchBytes(String pattern, int limit) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        if (pattern == null || pattern.isEmpty()) return "pattern is required";
++        String p = pattern.replaceAll("\\s+", "").replace("0x", "");
++        if (p.length() % 2 != 0) return "pattern must contain an even number of hex digits";
++        int n = p.length() / 2;
++        if (n == 0) return "pattern is empty";
++        byte[] bytes = new byte[n];
++        byte[] mask = new byte[n];
++        for (int i = 0; i < n; i++) {
++            String tok = p.substring(i * 2, i * 2 + 2);
++            if (tok.equals("??") || tok.equals("..")) {
++                bytes[i] = 0;
++                mask[i] = 0;
++            } else {
++                try {
++                    bytes[i] = (byte) Integer.parseInt(tok, 16);
++                } catch (NumberFormatException e) {
++                    return "Invalid hex pair '" + tok + "' in pattern";
++                }
++                mask[i] = (byte) 0xFF;
++            }
++        }
++        StringBuilder sb = new StringBuilder();
++        Address at = program.getMinAddress();
++        int found = 0;
++        while (at != null && found < limit) {
++            Address hit = program.getMemory().findBytes(at, bytes, mask, true, TaskMonitor.DUMMY);
++            if (hit == null) break;
++            Function f = program.getFunctionManager().getFunctionContaining(hit);
++            sb.append(hit);
++            if (f != null) sb.append("  in ").append(f.getName());
++            sb.append("\n");
++            found++;
++            try {
++                at = hit.add(1);
++            } catch (Exception e) {
++                break;
++            }
++        }
++        if (found == 0) return "No matches for pattern: " + pattern;
++        return sb.toString();
++    }
++
++    /** Accept either a function name or an address inside it. */
++    private Function resolveFunction(String ident) {
++        Program program = getCurrentProgram();
++        if (program == null || ident == null || ident.isEmpty()) return null;
++        for (Function f : program.getFunctionManager().getFunctions(true)) {
++            if (f.getName().equals(ident)) return f;
++        }
++        try {
++            Address a = program.getAddressFactory().getAddress(ident);
++            if (a != null) return program.getFunctionManager().getFunctionContaining(a);
++        } catch (Exception ignored) {
++        }
++        return null;
++    }
++
++    private String listCallers(String ident) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        Function f = resolveFunction(ident);
++        if (f == null) return "Function not found: " + ident;
++        StringBuilder sb = new StringBuilder();
++        for (Function c : f.getCallingFunctions(TaskMonitor.DUMMY)) {
++            sb.append(c.getName()).append(" @ ").append(c.getEntryPoint()).append("\n");
++        }
++        if (sb.length() == 0) return "No callers of " + f.getName();
++        return sb.toString();
++    }
++
++    private String listCallees(String ident) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        Function f = resolveFunction(ident);
++        if (f == null) return "Function not found: " + ident;
++        StringBuilder sb = new StringBuilder();
++        for (Function c : f.getCalledFunctions(TaskMonitor.DUMMY)) {
++            sb.append(c.getName()).append(" @ ").append(c.getEntryPoint()).append("\n");
++        }
++        if (sb.length() == 0) return "No callees of " + f.getName();
++        return sb.toString();
++    }
++
++
++    // ---- ghidramcp-relab additions (stage 2) ----
++
++    /**
++     * Import a file from the Ghidra host filesystem and open it in the tool.
++     *
++     * The path is resolved inside Linux, not on the Windows side: put the file
++     * in the shared folder (/mnt/share) if it came from Windows.
++     */
++    private String importBinary(String path, boolean analyze) {
++        if (path == null || path.isEmpty()) return "path is required";
++        File file = new File(path);
++        if (!file.isFile()) {
++            return "File not found (this path is resolved inside Linux): " + path;
++        }
++        Project project = tool.getProject();
++        if (project == null) return "No project is open in Ghidra";
++
++        MessageLog log = new MessageLog();
++        try {
++            LoadResults<Program> results = AutoImporter.importByUsingBestGuess(
++                    file, project,
++                    project.getProjectData().getRootFolder().getPathname(),
++                    this, log, TaskMonitor.DUMMY);
++
++            Program program = results.getPrimaryDomainObject(this);
++            results.save(TaskMonitor.DUMMY);
++
++            String name = program.getName();
++            String lang = program.getLanguage().getLanguageID().toString();
++
++            // Analyse BEFORE handing the program to the tool. Opening an
++            // unanalysed program makes Ghidra raise a modal "Analysis Options"
++            // dialog, which blocks this HTTP handler until somebody clicks it.
++            if (analyze) {
++                analyzeProgram(program);
++            } else {
++                // Even when skipping analysis, suppress the prompt - an agent
++                // has no way to answer it.
++                int tx = program.startTransaction("GhidraMCP suppress analyze prompt");
++                try {
++                    GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
++                } finally {
++                    program.endTransaction(tx, true);
++                }
++            }
++
++            ProgramManager pm = tool.getService(ProgramManager.class);
++            if (pm != null) {
++                pm.openProgram(program);
++            }
++
++            // The tool holds its own reference now; drop ours.
++            results.release(this);
++
++            StringBuilder sb = new StringBuilder();
++            sb.append("Imported ").append(name).append("\n");
++            sb.append("source: ").append(path).append("\n");
++            sb.append("language: ").append(lang).append("\n");
++            sb.append("analysis: ").append(analyze ? "started" : "skipped").append("\n");
++            String logText = log.toString();
++            if (logText != null && !logText.trim().isEmpty()) {
++                sb.append("loader log:\n").append(logText);
++            }
++            return sb.toString();
++        } catch (Exception e) {
++            return "Import failed: " + e.getClass().getSimpleName() + ": " + e.getMessage();
++        }
++    }
++
++    private void analyzeProgram(Program program) {
++        int tx = program.startTransaction("GhidraMCP analysis");
++        try {
++            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
++            mgr.initializeOptions();
++            mgr.reAnalyzeAll(null);
++            mgr.startAnalysis(TaskMonitor.DUMMY);
++            // Record that analysis happened. Without this the tool still asks,
++            // via a modal dialog that blocks the HTTP handler thread.
++            GhidraProgramUtilities.markProgramAnalyzed(program);
++        } finally {
++            program.endTransaction(tx, true);
++        }
++    }
++
++    private String analyzeCurrentProgram() {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        try {
++            analyzeProgram(program);
++            return "Analysis started on " + program.getName()
++                    + " (functions so far: " + program.getFunctionManager().getFunctionCount() + ")";
++        } catch (Exception e) {
++            return "Analysis failed: " + e.getMessage();
++        }
++    }
++
++    private String saveCurrentProgram() {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        try {
++            program.save("GhidraMCP save", TaskMonitor.DUMMY);
++            return "Saved " + program.getName();
++        } catch (Exception e) {
++            return "Save failed: " + e.getMessage();
++        }
++    }
++
++    /**
++     * Overwrite bytes in program memory. This changes the analysis database,
++     * not the file on disk - use export_program to write a patched binary out.
++     * The previous bytes are returned so a patch can be reversed.
++     */
++    private String patchBytes(String addressStr, String hex) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        if (addressStr == null || addressStr.isEmpty()) return "address is required";
++        if (hex == null || hex.isEmpty()) return "bytes is required";
++
++        String h = hex.replaceAll("\\s+", "").replace("0x", "");
++        if (h.length() % 2 != 0) return "bytes must contain an even number of hex digits";
++        byte[] data = new byte[h.length() / 2];
++        for (int i = 0; i < data.length; i++) {
++            try {
++                data[i] = (byte) Integer.parseInt(h.substring(i * 2, i * 2 + 2), 16);
++            } catch (NumberFormatException e) {
++                return "Invalid hex pair at position " + i;
++            }
++        }
++
++        final AtomicReference<String> out = new AtomicReference<>("Patch did not run");
++        try {
++            SwingUtilities.invokeAndWait(() -> {
++                int tx = program.startTransaction("GhidraMCP patch bytes");
++                boolean ok = false;
++                try {
++                    Address addr = program.getAddressFactory().getAddress(addressStr);
++                    if (addr == null) {
++                        out.set("Invalid address: " + addressStr);
++                        return;
++                    }
++                    byte[] before = new byte[data.length];
++                    program.getMemory().getBytes(addr, before);
++                    program.getMemory().setBytes(addr, data);
++                    ok = true;
++                    out.set("Patched " + data.length + " byte(s) at " + addr
++                            + "\nbefore: " + toHexString(before)
++                            + "\nafter:  " + toHexString(data));
++                } catch (Exception e) {
++                    out.set("Patch failed: " + e.getMessage());
++                } finally {
++                    program.endTransaction(tx, ok);
++                }
++            });
++        } catch (Exception e) {
++            return "Patch failed: " + e.getMessage();
++        }
++        return out.get();
++    }
++
++    /**
++     * Export the program. format=binary writes raw memory bytes (patches
++     * included); format=original writes the originally imported file.
++     */
++    private String exportProgram(String path, String format) {
++        Program program = getCurrentProgram();
++        if (program == null) return "No program loaded";
++        if (path == null || path.isEmpty()) return "path is required";
++        String fmt = (format == null || format.isEmpty()) ? "binary" : format.toLowerCase();
++        File out = new File(path);
++        try {
++            Exporter exporter;
++            if (fmt.startsWith("orig")) {
++                exporter = new OriginalFileExporter();
++            } else if (fmt.startsWith("bin")) {
++                exporter = new BinaryExporter();
++            } else {
++                return "Unknown format '" + format + "' (use binary or original)";
++            }
++            boolean ok = exporter.export(out, program, null, TaskMonitor.DUMMY);
++            if (!ok) {
++                return "Export failed: " + exporter.getMessageLog().toString();
++            }
++            return "Exported " + program.getName() + " to " + out.getAbsolutePath()
++                    + " (" + fmt + ", " + out.length() + " bytes)";
++        } catch (Exception e) {
++            return "Export failed: " + e.getClass().getSimpleName() + ": " + e.getMessage();
++        }
++    }
++
+ }
+diff --git a/src/main/resources/Module.manifest b/src/main/resources/Module.manifest
+index 1aa8264..e69de29 100644
+--- a/src/main/resources/Module.manifest
++++ b/src/main/resources/Module.manifest
+@@ -1,2 +0,0 @@
+-GHIDRA_MODULE_NAME=GhidraMCP
+-GHIDRA_MODULE_DESC=An HTTP server plugin for Ghidra
+diff --git a/src/main/resources/extension.properties b/src/main/resources/extension.properties
+index 3ca8018..dc6ffe6 100644
+--- a/src/main/resources/extension.properties
++++ b/src/main/resources/extension.properties
+@@ -2,5 +2,5 @@ name=GhidraMCP
+ description=A plugin that runs an embedded HTTP server to expose program data.
+ author=LaurieWired
+ createdOn=2025-03-22
+-version=11.3.2
+-ghidraVersion=11.3.2
+\ No newline at end of file
++version=12.1.3
++ghidraVersion=12.1.3
+\ No newline at end of file
