@@ -169,6 +169,10 @@ explicit `WxH`. Shortcuts for the first two are created by
 - **Run GUI targets on `:10`, not `:0`.** Under WSLg a window reports 1x1
   geometry and screenshots come back blank — it is a proxy for a real Windows
   window. Xephyr behaves normally.
+- **`pkill -f` matches the shell running it.** The pattern is in that shell's
+  own argv, so the call kills the caller and returns exit `-15` with no output -
+  which reads as the lab dying rather than a self-match. Bracket the first
+  character: `pkill -f '[N]ame'`. `lab_kill` does this for you.
 - **CRLF kills shebangs.** These files live on an NTFS share; reinstall with
   `tr -d '\r'` (what `install.sh` does) or you get a confusing "not found".
 - **Never reposition the desktop window from Windows.** WSLg tracks where it

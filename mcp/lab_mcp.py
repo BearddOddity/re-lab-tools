@@ -110,9 +110,25 @@ def lab_run_target(path: str, display: str = DEFAULT_DISPLAY) -> str:
 
 @mcp.tool()
 def lab_kill(pattern: str) -> str:
-    """Kill processes matching a pattern (pkill -f)."""
-    return run(["bash", "-lc", f"pkill -f '{pattern}'; sleep 1; "
-                               f"pgrep -cf '{pattern}' || true"])
+    """
+    Kill processes whose command line matches `pattern`, and report how many
+    survived.
+
+    The pattern's first character is wrapped in a bracket expression before use.
+    Without that, pkill matches the shell running it - the pattern is sitting in
+    that shell's own argv - so the call kills itself, returns signal 15 and no
+    output, and looks like the lab died rather than like a self-match. Bracketing
+    leaves the regex meaning unchanged while making the literal in argv differ
+    from what the regex accepts.
+    """
+    if not pattern:
+        return "refusing to kill on an empty pattern"
+    safe = f"[{pattern[0]}]{pattern[1:]}"
+    return run(["bash", "-lc",
+                f"pkill -f '{safe}'; sleep 1; "
+                # pgrep -c prints 0 AND exits non-zero when nothing matches, so
+                # a `|| echo 0` fallback prints the count twice.
+                f"echo \"survivors: $(pgrep -cf '{safe}' | head -1)\""])
 
 
 # ---------------------------------------------------------------- gui
