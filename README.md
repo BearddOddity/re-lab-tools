@@ -100,6 +100,32 @@ Wine prefixes. It prints the few steps that cannot be automated — the
 `D:\re-lab\restore.ps1` takes minutes rather than a full rebuild. Use this
 script when the snapshot is gone, or on a new machine.
 
+## Making it feel like a desktop, not a tool
+
+`re-desktop` takes `fullscreen`, `portrait` (1080x1920), `wide`, `tall`, or an
+explicit `WxH`. Shortcuts for the first two are created by
+`windows/make-shortcuts.ps1`.
+
+- **GPU acceleration.** Mesa defaults to `llvmpipe` in WSL even though
+  `/dev/dxg` and the d3d12 Gallium driver are both present, so everything
+  renders on the CPU and WSLg labels the window `[WARN:COPY MODE]`.
+  `re-desktop` sets `GALLIUM_DRIVER=d3d12`, which gives
+  `OpenGL renderer string: D3D12 (<your GPU>)` and direct rendering, inside the
+  nested desktop as well as on WSLg directly.
+- **Dark everywhere.** The XFCE theme alone leaves Qt apps light next to a dark
+  panel, so `re-desktop` also exports `GTK_THEME`, `QT_STYLE_OVERRIDE` and
+  `QT_QPA_PLATFORMTHEME`, and `~/.config/gtk-{3,4}.0/settings.ini` sets
+  `gtk-application-prefer-dark-theme`.
+- **The Windows title bar cannot be themed.** The desktop window is hosted by
+  `msrdc.exe`, which **custom-draws its own caption**. Setting
+  `DWMWA_USE_IMMERSIVE_DARK_MODE`, `DWMWA_CAPTION_COLOR` and
+  `DWMWA_BORDER_COLOR` all return `S_OK` and change nothing, and Windows being
+  in dark mode system-wide makes no difference either. **Use `fullscreen`** -
+  there is no caption at all, which is also the closest thing to a real Linux
+  desktop.
+- Apps installed with `apt` appear in the XFCE menu on their own, sound works
+  through WSLg's PulseServer, and the network is shared with the host.
+
 ## Things that will bite
 
 - **Processes started from Windows die immediately.** A process launched by a
