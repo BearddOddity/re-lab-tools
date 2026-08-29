@@ -54,6 +54,9 @@ Operating the lab itself.
 | `ProbeAddress.java` | Ghidra script — every instruction touching an address range, reads vs writes |
 | `ProbeUndefined.java` | Ghidra script — what surrounds code that has no function |
 | `WhoRefs.java` | Ghidra script — references to an address, and whether each referrer is itself lifted |
+| `FindVtablesByCtor.java` | Ghidra script — finds vtables RTTI cannot see, from constructor vptr stores |
+| `DumpPtrTable.java` | Ghidra script — dumps a function-pointer table around an address |
+| `IsVtable.java` | Ghidra script — walks back to an RTTI locator to name a vtable's class |
 | `function-queue.py` | Works through unnamed game functions in batches, keeping state |
 | `classify-shared-functions.py` | Splits a binary's functions into shared library/engine code and code unique to it |
 
@@ -295,6 +298,47 @@ Name from evidence and claim no more than that. `FUN_00062f10` copies a string,
 scans for a `%END%` marker and pulls replacements from the resource manager: it
 is `ExpandTextMacros_PercentEnd`. Its callers are `CBlock` virtuals, but `this`
 being a `CBlock` is inference, so no class prefix was claimed.
+
+### Section flags are not a data/code discriminator on XBE
+
+**This XBE marks `.rdata` executable.** Any filter of the form "the target must
+live in a non-executable block" silently rejects every vtable and every constant
+table in the binary. It cost two wrong diagnoses here before a diagnostic printed
+`block=.rdata exec=true` and made it obvious.
+
+Key on whether the target *is* code instead - `getInstructionAt(target) == null`
+distinguishes a table from a function regardless of how the section is flagged.
+
+### Finding vtables RTTI cannot see
+
+`WalkMsvcRtti` starts from type descriptors, so it only finds classes the
+compiler emitted RTTI for. A class built without it is invisible to that method
+entirely - and on X-Men Legends one such class is why the subsystem table at
+`0x005BB700` is never written: its registrar is virtual slot 40 of an RTTI-less
+vtable, reached only through a data pointer.
+
+`FindVtablesByCtor.java` works from the other end. A constructor assigns the
+vptr with `mov [reg], <address>` where the address begins an array of code
+pointers, and that store needs no type information at all.
+
+| | |
+|---|---|
+| candidate vtables from ctor stores | 1,261 |
+| already known from RTTI | 1,203 |
+| **RTTI-less vtables** | **58** |
+| functions named | 121 |
+| constructors named | 22 |
+
+The overlap is what makes the result trustworthy: the method independently
+rediscovers almost every vtable RTTI already knew, so the 58 it adds are
+credible rather than noise. Run it after `WalkMsvcRtti`, never instead of it -
+RTTI gives real class names, this gives only `vt_<address>`.
+
+**Debug a zero-result filter against a case you have already proven exists.**
+This returned nothing twice, and both times the temptation was to adjust string
+handling and re-run. Printing what each predicate actually saw at one known-good
+instruction found both real bugs in a minute: the operand renders as
+`dword ptr [ESI]` rather than `[ESI]`, and the section-flag guard above.
 
 ### Code that belongs to no function is invisible to a recompiler
 
